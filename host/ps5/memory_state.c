@@ -171,10 +171,6 @@ static Ps5MemResult page_range_validate(uint64_t address, uint64_t bytes, uint64
     return PS5_MEM_OK;
 }
 
-static uint16_t page_range_mask(unsigned first, unsigned count) {
-    return (uint16_t)(((UINT32_C(1) << count) - 1u) << first);
-}
-
 Ps5MemResult ps5_mem_pages_claim(Ps5MemState *state, uint64_t guest_address, uint64_t bytes) {
     uint64_t end, at;
     Ps5MemResult r = page_range_validate(guest_address, bytes, &end);
@@ -328,7 +324,8 @@ Ps5MemResult ps5_mem_extent_retire(Ps5MemState *state, uint64_t guest_base) {
 int ps5_mem_extent_release_ready(const Ps5MemState *state, uint64_t guest_base) {
     const Ps5MemExtent *e = find_extent_const(state, guest_base);
     unsigned i;
-    if (!e || !e->pending_release || e->reserved_mask || e->mapped_mask || e->gpu_mask) return 0;
+    if (!e || !e->pending_release || e->reserved_mask || e->mapped_mask || e->gpu_mask ||
+        e->allocated_pages || e->zero_pending) return 0;
     for (i = 0; i < PS5_MEM_VIEWS_PER_EXTENT; ++i)
         if (e->import_refs[i]) return 0;
     return 1;
