@@ -58,6 +58,11 @@ PGO = os.environ.get("RX_PGO", "")
 # (host/posix: its windows.h is found first), the window and sound on SDL2. RELINK_SYSROOT=<dir>: compile and link
 # against that root (the AppImage's: glibc 2.35, so the game runs on older systems than the one that built it).
 # RELINK_VK_PREBUILT=<relink_vk.so>: the Vulkan back end as built already (the AppImage's), not compiled here.
+# PS5 is intentionally rejected until its dedicated source set and title link are implemented.
+# Without this guard, RX_TARGET=ps5 would be mistaken for desktop Linux and produce the wrong artifacts.
+if toolchain.ps5():
+    raise SystemExit("RX_TARGET=ps5 is not buildable yet: PS5 host/platform sources and the static RADV title link are not integrated.")
+
 LINUX = not toolchain.windows()   # (relink: RX_TARGET=windows on Linux builds the Windows game, with llvm-mingw)
 POSIX = os.path.join(kit.HERE, "..", "host", "posix")
 SYSROOT = os.environ.get("RELINK_SYSROOT", "")

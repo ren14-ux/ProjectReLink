@@ -7,6 +7,11 @@ def emsdk():
     return os.environ.get("EMSDK") or (r"C:\emsdk" if os.name == "nt" else os.path.expanduser("~/emsdk"))
 
 
+def ps5():
+    """Explicit PS5 cross-target selection; the build driver must provide its own SDK and host implementation."""
+    return os.environ.get("RX_TARGET", "").lower() == "ps5"
+
+
 def windows():
     """(relink) the game is built for Windows: on Windows, or with RX_TARGET=windows on another system (a cross build, with
     llvm-mingw's release for that system in RELINK_MINGW)"""
