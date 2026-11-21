@@ -31,6 +31,9 @@
 #include "import_hold.h"
 #include "mirror_inherit.h"
 #include "mirror_trim.h"
+#if defined(RELINK_PS5_RADV)
+#include "../../host/ps5/memory.h"
+#endif
 #ifdef __linux__
 #include <cerrno>
 #include <dlfcn.h>
@@ -52,6 +55,9 @@ struct Pool {
     std::vector<VkDeviceMemory> pieces;   // (a pool imported as several dma-bufs: the ones after `memory`)
     VkBuffer buffer = VK_NULL_HANDLE;
     VkDeviceAddress address = 0;
+#if defined(RELINK_PS5_RADV)
+    bool ps5_import_held = false; // guest backing held until this import's GPU retirement value completes
+#endif
     // its VRAM mirror (see "the VRAM mirror" below)
     enum : uint8_t { MIRROR_NONE, MIRROR_WANTED, MIRROR_ON, MIRROR_REFUSED } mstate = MIRROR_NONE;
     VkBuffer mirror = VK_NULL_HANDLE;
@@ -87,6 +93,33 @@ struct Pool {
     std::vector<uint32_t> wb_flush_words; // (the words of wb_flushing that are not zero)
     uint32_t wb_pending_n = 0;
 };
+#if defined(RELINK_PS5_RADV)
+struct Ps5ImportHoldGuard {
+    uint64_t lo = 0, bytes = 0;
+    bool active = false;
+    Ps5ImportHoldGuard(uint64_t a, uint64_t n) : lo(a), bytes(n), active(true) {}
+    ~Ps5ImportHoldGuard() {
+        if (active && ps5_memory_import_release(lo, bytes) != 0)
+            logf("vk: PS5 import hold rollback failed for guest %#llx..%#llx",
+                 (unsigned long long)lo, (unsigned long long)(lo + bytes));
+    }
+    void transfer(Pool& pool) {
+        pool.ps5_import_held = true;
+        active = false;
+    }
+};
+static bool ps5_import_release(Pool& pool) {
+    if (!pool.ps5_import_held) return true;
+    if (ps5_memory_import_release(pool.lo, pool.hi - pool.lo) != 0) {
+        logf("vk: PS5 import hold release failed for guest %#llx..%#llx",
+             (unsigned long long)pool.lo, (unsigned long long)pool.hi);
+        return false;
+    }
+    pool.ps5_import_held = false;
+    return true;
+}
+#endif
+
 uint64_t mem_rec_value = 0, mem_completed = 0;   // (the recording being made, and the GPU's progress)
 
 struct GuestPool {
@@ -363,6 +396,13 @@ bool import_pool(uint64_t lo, uint64_t hi, Pool& p) {
     // Check the normalized range: on PS5, the 16 KiB expansion can overlap a
     // recently refused neighboring import even when the original 4 KiB range did not.
     if (import_on_hold(lo, hi)) return false;
+#if defined(RELINK_PS5_RADV)
+    if (ps5_memory_import_acquire(lo, hi - lo) != 0) {
+        import_remember_failure(lo, hi);
+        return false;
+    }
+    Ps5ImportHoldGuard ps5_hold(lo, hi - lo);
+#endif
     p.lo = lo;
     p.hi = hi;
     uint8_t* ptr = host->guest_base() + lo;
@@ -490,6 +530,9 @@ bool import_pool(uint64_t lo, uint64_t hi, Pool& p) {
         logf("vk: addr import %#llx..%#llx at gpu %#llx..%#llx", (unsigned long long)lo, (unsigned long long)hi,
              (unsigned long long)p.address, (unsigned long long)(p.address + (hi - lo)));
     t4 = clk::now();
+#if defined(RELINK_PS5_RADV)
+    ps5_hold.transfer(p);
+#endif
     return true;
 }
 
