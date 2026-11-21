@@ -39,6 +39,21 @@ This is the concrete renderer integration route for ReLink's guest pages, subjec
 
 Do not route PS5 through Linux udmabuf. Do not release or remap a guest extent while RADV still owns an imported buffer for it.
 
+## Newly identified blocker: guest pointer width mismatch
+
+A source-level inconsistency must be resolved before implementing the PS5 allocator:
+
+- `host/hos.h` defines a 512 GiB guest window (`HOS_GUEST_SPACE = 1ULL << 39`) and places the heap at guest offset `0x1000000000` (64 GiB).
+- `hos_main.c:reserve_guest()` reserves the full window at `A64_HOST_BASE`.
+- However, `third_party/a64-kit/rt/a64.h` currently defines `A64_PTR(a)` as `A64_MEM + (uint32_t)(a)`. This truncates every guest offset to 32 bits.
+- `host/hos.h` defines `GP(a)` through `A64_PTR(a)`; host-side heap, system, and address-region helpers therefore appear to wrap offsets above 4 GiB into the first 4 GiB of the window.
+
+The runtime header's own description says it models a flat guest memory below 4 GiB, while the HOS layer describes and allocates a 39-bit guest address space. This is not merely a PS5-specific issue: it is an architectural mismatch in the current source tree. Before changing the cast, audit all lifted guest address producers and consumers, generated code assumptions, pointer arithmetic, and the host API contract. A blind change from `uint32_t` to `uint64_t` could alter the semantics of the lifter's 32-bit guest pointers even if it fixes host-side allocations.
+
+### Consequence
+
+Do not implement or enable PS5 guest-memory mapping until this address-width contract is reconciled. The direct-memory plan remains viable only if the actual guest-address model and the 512 GiB HOS layout are made consistent first. No runtime behavior is inferred from this source inspection alone.
+
 ## Decision
 
 Do not add a speculative `hos_mem_ps5.c` yet. The SDK provides enough primitives to design a direct-memory-backed arena, but the exact 512 GiB reservation, overlapping-commit bookkeeping, zeroing/decommit rules, and GPU-visible mapping/import contract must be established first. The PS5 build guard remains correct until these are implemented together.
