@@ -77,6 +77,8 @@ Ps5MemResult ps5_mem_view_gpu_revoked(Ps5MemState *state, uint64_t guest_view);
  * the caller has explicitly zero-filled it and calls mark_zeroed.
  */
 Ps5MemResult ps5_mem_pages_claim(Ps5MemState *state, uint64_t guest_address, uint64_t bytes);
+/* Idempotently claim only unowned pages; existing ownership is preserved. */
+Ps5MemResult ps5_mem_pages_claim_missing(Ps5MemState *state, uint64_t guest_address, uint64_t bytes);
 Ps5MemResult ps5_mem_pages_free(Ps5MemState *state, uint64_t guest_address, uint64_t bytes);
 Ps5MemResult ps5_mem_pages_mark_zeroed(Ps5MemState *state, uint64_t guest_address, uint64_t bytes);
 /* Return the four-bit 16 KiB view mask containing at least one allocated page. */
@@ -85,6 +87,8 @@ Ps5MemResult ps5_mem_pages_allocated_views(const Ps5MemState *state, uint64_t gu
 /* Return the sixteen-bit mask of pages that still require zero-fill. */
 Ps5MemResult ps5_mem_pages_zero_pending(const Ps5MemState *state, uint64_t guest_extent,
                                         uint16_t *page_mask_out);
+Ps5MemResult ps5_mem_pages_allocated_mask(const Ps5MemState *state, uint64_t guest_extent,
+                                          uint16_t *page_mask_out);
 
 /* Import ranges are 16 KiB aligned and must be fully mapped and GPU-granted. */
 Ps5MemResult ps5_mem_import_acquire(Ps5MemState *state, uint64_t guest_address, uint64_t bytes);
@@ -95,6 +99,10 @@ Ps5MemResult ps5_mem_extent_retire(Ps5MemState *state, uint64_t guest_base);
 
 /* True only when the SDK backing may be released: no mappings, grants, or imports remain. */
 int ps5_mem_extent_release_ready(const Ps5MemState *state, uint64_t guest_base);
+/* Snapshot per-view ownership; any output may be NULL. */
+Ps5MemResult ps5_mem_extent_view_state(const Ps5MemState *state, uint64_t guest_base,
+                                       uint8_t *reserved_mask, uint8_t *mapped_mask,
+                                       uint8_t *gpu_mask, uint32_t import_refs[PS5_MEM_VIEWS_PER_EXTENT]);
 
 /* Read the opaque handle while the extent is still registered. */
 Ps5MemResult ps5_mem_extent_get_handle(const Ps5MemState *state, uint64_t guest_base,
