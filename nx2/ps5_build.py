@@ -21,7 +21,7 @@ def preflight(root, toolchain):
     host = os.path.join(root, "host", "ps5")
     required_host = (
         "entry.c",       # title lifecycle and common game boot handoff
-        "memory.c",      # exact guest reservation, commit/decommit, first-touch policy
+        "memory.c",      # explicit guest-page commit/decommit and Vulkan import lifetime service
         "memory_state.c", # 4 KiB page / 16 KiB view / 64 KiB extent lifetime bookkeeping
         "memory_state.h",
         "memory_backend.c", # serialized mapping, import, and release coordinator
