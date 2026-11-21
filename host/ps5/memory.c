@@ -227,7 +227,8 @@ static Ps5MemResult reap_extent(uint64_t guest_extent) {
         for (view = 0; view < PS5_MEM_VIEWS_PER_EXTENT; ++view)
             if (imports[view]) return PS5_MEM_BUSY;
         r = ps5_mem_backend_retire_extent(&service.state, guest_extent);
-        if (r != PS5_MEM_OK) return r;
+        /* A previous retry may already have marked the now-quiescent extent retiring. */
+        if (r != PS5_MEM_OK && r != PS5_MEM_STATE) return r;
         return ps5_mem_backend_release_extent(&service.state, &service.pool, guest_extent);
     }
     return PS5_MEM_OK;
