@@ -25,6 +25,7 @@ typedef struct Ps5SdkExtentSlot {
     struct ps5_shm shm;
     uint32_t generation;
     void *views[PS5_SDK_EXTENT_VIEW_COUNT];
+    uint8_t reserved_mask;
     uint8_t mapped_mask;
     uint8_t occupied;
 } Ps5SdkExtentSlot;
@@ -52,7 +53,14 @@ Ps5SdkExtentResult ps5_sdk_extent_pool_init(Ps5SdkExtentPool *pool,
 /* Allocates one 64 KiB direct-memory extent and returns a generation token. */
 Ps5SdkExtentResult ps5_sdk_extent_allocate(Ps5SdkExtentPool *pool, uint64_t *token_out);
 
-/* Map/unmap one fixed 16 KiB view. Each extent supports four tracked views. */
+/* Reserve/release one exact 16 KiB guest view before/after fixed mapping. */
+Ps5SdkExtentResult ps5_sdk_extent_reserve_view(Ps5SdkExtentPool *pool, uint64_t token,
+                                               unsigned view_index, void *address);
+Ps5SdkExtentResult ps5_sdk_extent_release_view_reservation(Ps5SdkExtentPool *pool,
+                                                            uint64_t token,
+                                                            unsigned view_index);
+
+/* Map/unmap one fixed 16 KiB view. Mapping consumes its tracked reservation. */
 Ps5SdkExtentResult ps5_sdk_extent_map_view(Ps5SdkExtentPool *pool, uint64_t token,
                                            unsigned view_index, void *address,
                                            int protection, void **view_out);
