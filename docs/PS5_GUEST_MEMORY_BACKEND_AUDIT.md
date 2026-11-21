@@ -126,3 +126,22 @@ The probe is source-only at this stage. It must be compiled into a PS5 title and
 Do not add a speculative `hos_mem_ps5.c` yet. The SDK provides enough primitives to design a direct-memory-backed arena, but the exact 512 GiB reservation, overlapping-commit bookkeeping, zeroing/decommit rules, and GPU-visible mapping/import contract must be established first. The PS5 build guard remains correct until these are implemented together.
 
 No PS5 compilation or console test is claimed.
+
+
+## Follow-up: exact SDK mapping semantics (2026-11-21)
+
+The pinned SDK source was inspected directly at `platform/include/ps5platform/kernel.h`, `platform/include/ps5platform/shm.h`, and `platform/src/shm.c`. This narrows the allocator design but does not close the first-touch gate:
+
+- `sceKernelReserveVirtualRange()` reserves virtual address space; `sceKernelMunmap()` releases mappings/reservations. The kernel header declares both with the signatures used by the SDK platform layer.
+- `sceKernelAllocateDirectMemory()` allocates physical direct memory in 64 KiB-aligned units. `sceKernelMapDirectMemory()` maps a direct-memory offset at a requested virtual address; its documented page alignment is 16 KiB.
+- `ps5_shm_create()` rounds backing allocations up to 64 KiB. `ps5_shm_map()` maps a view at 16 KiB granularity and can replace a reserved range with a fixed mapping.
+- Crucially, `ps5_shm_map()` translates only `PS5_SHM_READ/WRITE/EXEC` to CPU protection bits. It does not grant `PS5_KERNEL_PROT_GPU_READ/WRITE`. ReLink must therefore explicitly grant GPU access with the pinned RADV host-pointer import path (or use a reviewed SDK extension); the shared-memory helper alone is not a complete Vulkan mapping API.
+- The SDK helper's map/unmap path is ordinary thread-context code. It does not establish that allocation, mapping, or unmapping is safe from a SIGSEGV handler. The earlier signal probe established recoverable fault delivery and context access only, not kernel mapping from the handler.
+
+### Allocator consequences
+
+A PS5 page table cannot be represented as a simple 4 KiB bitmap. The implementation needs separate accounting for 16 KiB virtual mapping pages and 64 KiB physical direct-memory units. A 64 KiB physical unit may back four adjacent 16 KiB virtual pages, and it must not be released while any subpage remains mapped or any RADV import holds the corresponding guest range. Partial commits and frees therefore require a reference-counted or interval-based allocator, not one direct-memory allocation per arbitrary guest commit call.
+
+The existing `ps5_shm` wrapper is useful as a source of fixed-map mechanics, but its global direct-memory allocation model and CPU-only protections should not be wired into `hos_commit()` unchanged. The next safe implementation step is to settle a bounded arena layout and ownership table, then validate whether the required kernel map/protect calls are callable from the first-touch handler. Until then, no speculative PS5 allocator is added and the PS5 build guard remains in place.
+
+No compilation, first-touch mapping probe, or console test was performed for this follow-up.
