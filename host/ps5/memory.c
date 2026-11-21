@@ -90,7 +90,6 @@ static Ps5MemResult ensure_extent(uint64_t guest_base) {
 
 static Ps5MemResult map_allocated_views(uint64_t guest_extent) {
     uint8_t allocated_views = 0, reserved = 0, mapped = 0, gpu = 0;
-    uint32_t imports[PS5_MEM_VIEWS_PER_EXTENT] = {0};
     Ps5MemResult r = ps5_mem_pages_allocated_views(&service.state, guest_extent, &allocated_views);
     unsigned view;
     if (r != PS5_MEM_OK) return r;
@@ -359,6 +358,7 @@ int ps5_memory_shutdown(void) {
         return 0;
     }
     while (service.state.count) {
+        const size_t count_before = service.state.count;
         const uint64_t guest_extent = service.state.extents[0].guest_base;
         uint16_t allocated = 0;
         unsigned page;
@@ -374,6 +374,10 @@ int ps5_memory_shutdown(void) {
         if (r != PS5_MEM_OK) break;
         r = reap_extent(guest_extent);
         if (r != PS5_MEM_OK) break;
+        if (service.state.count == count_before) {
+            r = PS5_MEM_BUSY; /* outstanding import or failed kernel transition: leave state intact */
+            break;
+        }
     }
     if (r != PS5_MEM_OK || service.state.count) {
         pthread_mutex_unlock(&memory_mutex);
