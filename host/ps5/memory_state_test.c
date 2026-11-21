@@ -59,8 +59,12 @@ static void test_extent_capacity_and_boundaries(void) {
 
     assert(ps5_mem_state_init(&state, storage, 1) == PS5_MEM_OK);
     assert(ps5_mem_extent_add(&state, 0x300001, 1) == PS5_MEM_INVALID);
+    assert(ps5_mem_extent_add(&state, UINT64_MAX - 0xffff, 3) == PS5_MEM_INVALID);
     assert(ps5_mem_extent_add(&state, 0x300000, PS5_MEM_NO_HANDLE) == PS5_MEM_INVALID);
     assert(ps5_mem_extent_add(&state, 0x300000, 1) == PS5_MEM_OK);
+    uint64_t handle = 0;
+    assert(ps5_mem_extent_get_handle(&state, 0x300000, &handle) == PS5_MEM_OK);
+    assert(handle == 1);
     assert(ps5_mem_extent_add(&state, 0x400000, 2) == PS5_MEM_FULL);
     assert(ps5_mem_extent_retire(&state, 0x300001) == PS5_MEM_INVALID);
     assert(ps5_mem_extent_retire(&state, 0x300000) == PS5_MEM_OK);
