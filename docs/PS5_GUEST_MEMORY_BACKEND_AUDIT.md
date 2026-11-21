@@ -77,6 +77,16 @@ A PS5 memory backend must provide all of the following as one coordinated implem
 
 This confirms why adding only a `hos_commit_ps5()` function would be incomplete. The fault path, page-state tracking, and Vulkan import lifetime must be designed together.
 
+## PS5 first-touch signal support: source evidence and remaining proof
+
+The pinned SDK includes FreeBSD-compatible declarations for `sigaction()`, `sigaltstack()`, `SIGSEGV`, and `SIGBUS` in its FreeBSD headers. This is useful evidence that a POSIX-style signal API is part of the SDK surface, but header declarations alone do not establish that a PS5 title receives recoverable access-violation signals for reserved guest addresses, that its signal context can be edited to retry the faulting instruction, or that the handler can safely call the required kernel mapping APIs.
+
+The SDK platform layer inspected so far does not provide a guest-memory first-touch handler. Its existing direct-memory and shared-memory helpers are ordinary thread-context APIs. The next implementation gate is therefore a minimal PS5 title-side probe that reserves a test range, deliberately reads/writes an uncommitted page, and records whether the signal handler runs with a usable machine context. Only after that behavior is proven should a handler be added to ReLink. If the signal path is unavailable or cannot safely recover, use explicit commits at every guest allocation boundary and remove reliance on implicit first-touch for PS5.
+
+Also confirmed in the current code:
+- `A64_WRITE_TRACK` is enabled by default in `nx2/build.py`, unless `RX_SOFT_WRITE_WATCH=0`. Its dirty bitmap is sized for the first 4 GiB, and `A64_MARK` intentionally indexes with 32-bit guest addresses. This is a separate 4 GiB write-watch design, not the 39-bit host pointer conversion. PS5 build integration must decide whether to disable this path or redesign it before GPU write tracking is enabled.
+- `hos_mem.c`'s `pages_used` bitmap is also deliberately limited to the first 4 GiB; the allocation-pages path has a separate above-4-GiB branch that commits without using that bitmap. Do not expand this bitmap to 512 GiB without evaluating its memory cost and the existing zero-on-new-pages behavior.
+
 ## Decision
 
 Do not add a speculative `hos_mem_ps5.c` yet. The SDK provides enough primitives to design a direct-memory-backed arena, but the exact 512 GiB reservation, overlapping-commit bookkeeping, zeroing/decommit rules, and GPU-visible mapping/import contract must be established first. The PS5 build guard remains correct until these are implemented together.
