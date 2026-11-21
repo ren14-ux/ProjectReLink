@@ -3,4 +3,4 @@ all:
 	./build-title.sh
 
 clean:
-	rm -rf ../../build/ps5-guest-probe ../../dist/PPSA00000
+	rm -rf ../../build/ps5-guest-probe ../../dist/FAKE00001
