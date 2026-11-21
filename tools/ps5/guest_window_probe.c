@@ -10,58 +10,49 @@
 #include <stdint.h>
 #include <stdio.h>
 
-#include "ps5platform/kernel.h"
+#include "../../host/ps5/guest_window.h"
 
 #define GIB UINT64_C(0x40000000)
-#define BASE UINT64_C(0x1000000000) /* 64 GiB */
+#define BASE UINT64_C(0x1000000000) /* 64 GiB candidate, not a production default */
 #define SEGMENT_BYTES (UINT64_C(16) * GIB)
 #define SEGMENT_COUNT_512 (32u)
 #define SEGMENT_COUNT_448 (28u)
 
 static int
-reserve_exact(uintptr_t hint, size_t bytes, void **reserved)
+reserve_exact(uintptr_t hint, size_t bytes, Ps5GuestWindow *window)
 {
-   void *at = (void *)hint;
-   const int32_t result = sceKernelReserveVirtualRange(&at, bytes, 0,
-                                                       PS5_KERNEL_DIRECT_ALIGNMENT);
-   if (result != 0) {
-      printf("guest-window: reserve hint=0x%" PRIxPTR " bytes=0x%zx result=0x%08x\n",
-             hint, bytes, (unsigned)result);
-      return -1;
+   const Ps5GuestWindowResult result =
+      ps5_guest_window_reserve(window, hint, bytes);
+   if (result == PS5_GUEST_WINDOW_OK)
+      return 0;
+   if (result == PS5_GUEST_WINDOW_CLEANUP_REQUIRED) {
+      printf("guest-window: relocated reservation cleanup pending address=%p bytes=0x%zx\n",
+             window->address, window->bytes);
+      return -2;
    }
-   if ((uintptr_t)at != hint) {
-      printf("guest-window: moved hint=0x%" PRIxPTR " actual=%p bytes=0x%zx; releasing\n",
-             hint, at, bytes);
-      const int release = sceKernelMunmap(at, bytes);
-      if (release != 0) {
-         printf("guest-window: relocated-range release FAILED result=0x%08x; aborting probe\n",
-                (unsigned)release);
-         return -2; /* Do not continue with a possibly occupied range. */
-      }
-      return -1;
-   }
-   *reserved = at;
-   return 0;
+   printf("guest-window: reserve hint=0x%" PRIxPTR " bytes=0x%zx result=%d\n",
+          hint, bytes, (int)result);
+   return -1;
 }
 
 static int
 probe_one_range(size_t bytes)
 {
-   void *range = NULL;
-   const int result = reserve_exact((uintptr_t)BASE, bytes, &range);
+   Ps5GuestWindow window = {0};
+   const int result = reserve_exact((uintptr_t)BASE, bytes, &window);
    if (result != 0)
       return result;
    printf("guest-window: contiguous reservation PASS base=%p bytes=0x%zx end=0x%" PRIxPTR "\n",
-          range, bytes, (uintptr_t)range + bytes);
-   const int release = sceKernelMunmap(range, bytes);
-   printf("guest-window: contiguous release result=0x%08x\n", (unsigned)release);
-   return release == 0 ? 0 : -2;
+          window.address, bytes, (uintptr_t)window.address + bytes);
+   const Ps5GuestWindowResult release = ps5_guest_window_release(&window);
+   printf("guest-window: contiguous release result=%d\n", (int)release);
+   return release == PS5_GUEST_WINDOW_OK ? 0 : -2;
 }
 
 static int
 probe_segments(unsigned count)
 {
-   void *ranges[SEGMENT_COUNT_512] = {0};
+   Ps5GuestWindow ranges[SEGMENT_COUNT_512] = {{0}};
    unsigned reserved = 0;
    int result = 0;
 
@@ -77,7 +68,7 @@ probe_segments(unsigned count)
       const uintptr_t expected_end = (uintptr_t)(BASE + (uint64_t)count * SEGMENT_BYTES);
       printf("guest-window: segmented reservation PASS segments=%u base=0x%" PRIxPTR
              " end=0x%" PRIxPTR " bytes=0x%" PRIx64 "\n",
-             count, (uintptr_t)ranges[0], expected_end, (uint64_t)count * SEGMENT_BYTES);
+             count, (uintptr_t)ranges[0].address, expected_end, (uint64_t)count * SEGMENT_BYTES);
    } else {
       printf("guest-window: segmented reservation FAIL requested=%u reserved=%u\n",
              count, reserved);
@@ -86,10 +77,10 @@ probe_segments(unsigned count)
    int cleanup_failed = 0;
    while (reserved) {
       --reserved;
-      const int release = sceKernelMunmap(ranges[reserved], (size_t)SEGMENT_BYTES);
-      if (release != 0) {
-         printf("guest-window: cleanup segment=%u FAILED result=0x%08x\n",
-                reserved, (unsigned)release);
+      const Ps5GuestWindowResult release = ps5_guest_window_release(&ranges[reserved]);
+      if (release != PS5_GUEST_WINDOW_OK) {
+         printf("guest-window: cleanup segment=%u FAILED result=%d\n",
+                reserved, (int)release);
          cleanup_failed = 1;
       }
    }
