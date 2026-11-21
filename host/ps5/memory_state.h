@@ -24,6 +24,7 @@ typedef struct Ps5MemExtent {
     uint64_t guest_base;       /* 64 KiB aligned guest offset */
     uint64_t backing_handle;   /* opaque SDK direct-memory handle */
     uint32_t import_refs[PS5_MEM_VIEWS_PER_EXTENT];
+    uint8_t reserved_mask;     /* address-space views reserved and available to map */
     uint8_t mapped_mask;       /* CPU virtual views currently mapped */
     uint8_t gpu_mask;          /* views currently granted GPU access */
     uint8_t pending_release;   /* reject new imports; release when quiescent */
@@ -56,8 +57,11 @@ Ps5MemResult ps5_mem_state_init(Ps5MemState *state, Ps5MemExtent *storage, size_
 /* Register a successfully allocated 64 KiB physical extent. */
 Ps5MemResult ps5_mem_extent_add(Ps5MemState *state, uint64_t guest_base, uint64_t backing_handle);
 
+/* Reservation is recorded after reserve succeeds; a fixed map consumes it. */
+Ps5MemResult ps5_mem_view_reserved(Ps5MemState *state, uint64_t guest_view);
 /* Mapping/protection transitions are recorded only after the corresponding SDK call succeeds. */
 Ps5MemResult ps5_mem_view_mapped(Ps5MemState *state, uint64_t guest_view);
+/* Successful unmap clears mapped state; reserve again separately if the SDK restored a hole. */
 Ps5MemResult ps5_mem_view_unmapped(Ps5MemState *state, uint64_t guest_view);
 Ps5MemResult ps5_mem_view_gpu_granted(Ps5MemState *state, uint64_t guest_view);
 Ps5MemResult ps5_mem_view_gpu_revoked(Ps5MemState *state, uint64_t guest_view);
