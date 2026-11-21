@@ -30,6 +30,7 @@ typedef struct Ps5MemExtent {
     uint8_t pending_release;   /* reject new imports; release when quiescent */
     uint16_t allocated_pages;  /* sixteen 4 KiB logical guest pages in this extent */
     uint16_t zero_pending;     /* newly allocated/recycled pages requiring zero-fill */
+    uint16_t pending_free_pages; /* game-freed pages retained until their GPU imports retire */
     uint8_t occupied;
 } Ps5MemExtent;
 
@@ -80,6 +81,10 @@ Ps5MemResult ps5_mem_pages_claim(Ps5MemState *state, uint64_t guest_address, uin
 /* Idempotently claim only unowned pages; existing ownership is preserved. */
 Ps5MemResult ps5_mem_pages_claim_missing(Ps5MemState *state, uint64_t guest_address, uint64_t bytes);
 Ps5MemResult ps5_mem_pages_free(Ps5MemState *state, uint64_t guest_address, uint64_t bytes);
+/* Record a game free even when a Vulkan import still pins the containing view. */
+Ps5MemResult ps5_mem_pages_mark_pending_free(Ps5MemState *state, uint64_t guest_address, uint64_t bytes);
+Ps5MemResult ps5_mem_pages_pending_free(const Ps5MemState *state, uint64_t guest_extent,
+                                        uint16_t *page_mask_out);
 Ps5MemResult ps5_mem_pages_mark_zeroed(Ps5MemState *state, uint64_t guest_address, uint64_t bytes);
 /* Return the four-bit 16 KiB view mask containing at least one allocated page. */
 Ps5MemResult ps5_mem_pages_allocated_views(const Ps5MemState *state, uint64_t guest_extent,
