@@ -1,11 +1,10 @@
 #!/usr/bin/env bash
 # Build a PS5 title folder (PPSA00000), using the native title pipeline.
 set -euo pipefail
-
-root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
-vulkan_root=${PS5_VULKAN_ROOT:-$root/../PS5_Vulkan}
-vulkan_revision=7f492b4c6f67a4e8c8c67a4272cfeef22abea9cc
-sdk_revision=b83202be73e930050e00de0f1b4d9ec46c0391bf
+root=$(cd -- "$(dirname -- "\${BASH_SOURCE[0]}")/../.." && pwd)
+vulkan_root=\${PS5_VULKAN_ROOT:-$root/../PS5_Vulkan}
+vulkan_revision=$(awk '!/^#/ && NF { print; exit }' "$root/deps/ps5-vulkan-toolchain.commit")
+sdk_revision=$(awk '!/^#/ && NF { print; exit }' "$root/deps/ps5-payload-sdk.commit")
 title_id=PPSA00000
 work="$root/build/ps5-guest-probe"
 app="$root/dist/$title_id"
@@ -17,6 +16,7 @@ tool="$vulkan_root/build/runtime-shim/ps5-native-tool"
 libc="$vulkan_root/runtime/libc.prx"
 
 [[ -d "$vulkan_root/.git" ]] || { echo "PS5_VULKAN_ROOT must point to a PS5_Vulkan checkout" >&2; exit 2; }
+[[ -n "$vulkan_revision" && -n "$sdk_revision" ]] || { echo "missing pinned dependency revision" >&2; exit 2; }
 actual_vulkan_revision=$(git -C "$vulkan_root" rev-parse HEAD)
 [[ "$actual_vulkan_revision" == "$vulkan_revision" ]] || {
   echo "PS5_Vulkan revision mismatch: expected $vulkan_revision, found $actual_vulkan_revision" >&2
@@ -32,16 +32,37 @@ for file in "$wrapper" "$native/app_crt.cpp" "$native/ps5-pie.ld" "$native/app-s
   [[ -f "$file" ]] || { echo "missing native title input: $file" >&2; exit 2; }
 done
 
-# The reference project's reproducible host utility also produces the runtime
-# companion module. Rebuild only when either required artifact is absent.
-if [[ ! -x "$tool" || ! -f "$libc" ]]; then
+# Rebuild the native converter/runtime when absent or when the signed runtime
+# does not match the reference repository's checksum manifest.
+runtime_valid=0
+if [[ -x "$tool" && -f "$libc" && -f "$vulkan_root/runtime/libc.prx.sha256" ]] &&
+   (cd "$vulkan_root/runtime" && sha256sum --check --strict --quiet libc.prx.sha256); then
+  runtime_valid=1
+fi
+if [[ "$runtime_valid" -ne 1 ]]; then
   bash "$vulkan_root/tools/rebuild-libc.sh"
 fi
 [[ -x "$tool" && -f "$libc" ]] || { echo "native title tool or libc.prx was not produced" >&2; exit 2; }
 
+python3 - "$param" "$title_id" <<'PY'
+import json, re, sys
+with open(sys.argv[1], encoding="utf-8") as source:
+    p = json.load(source)
+title = sys.argv[2]
+if p.get("titleId") != title or not re.fullmatch(r"PPSA\d{5}", title):
+    raise SystemExit("param.json titleId does not match the expected PPSA title folder")
+if not re.fullmatch(r"\d{5}", p.get("conceptId", "")):
+    raise SystemExit("param.json conceptId must contain five digits")
+if not re.fullmatch(r"[A-Z]{2}\d{4}-" + re.escape(title) + r"_00-[A-Z0-9]{16}", p.get("contentId", "")):
+    raise SystemExit("param.json contentId is malformed or does not contain the title ID")
+PY
+
+shopt -s nullglob
+sdk_stubs=("$sdk"/target/lib/*.so)
+(( \${#sdk_stubs[@]} > 0 )) || { echo "no PS5 SDK import stubs found" >&2; exit 2; }
+
 mkdir -p "$work/obj"
 rm -f "$work/obj/"*.o "$work/llvm-pie.elf" "$work/eboot.elf"
-
 compile() {
   PS5_PAYLOAD_SDK="$sdk" sh "$wrapper" "$@"
 }
@@ -56,7 +77,7 @@ compile -std=c++20 -O2 -Wall -Wextra -fno-exceptions -fno-rtti \
   --version-script "$native/app-symbols.map" --exclude-libs=ALL \
   -e _start -o "$work/llvm-pie.elf" \
   "$work/obj/app_crt.o" "$work/obj/main.o" "$work/obj/guest_window_probe.o" \
-  --as-needed "$sdk"/target/lib/*.so
+  --as-needed "\${sdk_stubs[@]}"
 
 "$tool" link --in "$work/llvm-pie.elf" --out "$work/eboot.elf" \
   --stub-dir "$sdk/target/lib" --module-sdk 0x02000009 \
