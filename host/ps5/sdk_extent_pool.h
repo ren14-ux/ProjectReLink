@@ -28,6 +28,7 @@ typedef struct Ps5SdkExtentSlot {
     void *reservations[PS5_SDK_EXTENT_VIEW_COUNT];
     uint8_t reserved_mask;
     uint8_t mapped_mask;
+    uint8_t gpu_mask;
     uint8_t occupied;
 } Ps5SdkExtentSlot;
 
@@ -67,6 +68,9 @@ Ps5SdkExtentResult ps5_sdk_extent_map_view(Ps5SdkExtentPool *pool, uint64_t toke
                                            int protection, void **view_out);
 Ps5SdkExtentResult ps5_sdk_extent_unmap_view(Ps5SdkExtentPool *pool, uint64_t token,
                                              unsigned view_index);
+/* Change GPU access on a mapped view using kernel GPU protection bits only. */
+Ps5SdkExtentResult ps5_sdk_extent_set_gpu_access(Ps5SdkExtentPool *pool, uint64_t token,
+                                                  unsigned view_index, int protection);
 
 /*
  * Releases the direct-memory backing. Tracked CPU views must already be unmapped;
