@@ -184,6 +184,8 @@ Ps5MemResult ps5_mem_pages_claim(Ps5MemState *state, uint64_t guest_address, uin
         if (!e) return PS5_MEM_NOT_FOUND;
         if (e->pending_release || (e->allocated_pages & (UINT16_C(1) << page)))
             return PS5_MEM_STATE;
+        /* Do not change guest ownership beneath a live import of the containing view. */
+        if (e->import_refs[page / PS5_MEM_PAGES_PER_VIEW]) return PS5_MEM_BUSY;
     }
     for (at = guest_address; at < end; at += PS5_MEM_PAGE_SIZE) {
         uint64_t base = at & ~(PS5_MEM_EXTENT_SIZE - 1);
@@ -287,6 +289,9 @@ Ps5MemResult ps5_mem_import_acquire(Ps5MemState *state, uint64_t guest_address, 
         if (e->pending_release || !(e->mapped_mask & (1u << view)) ||
             !(e->gpu_mask & (1u << view)) || e->import_refs[view] == UINT32_MAX)
             return PS5_MEM_STATE;
+        /* The GPU must not import a view while any claimed subpage still needs zero-fill. */
+        if (e->zero_pending & (uint16_t)(UINT16_C(0xF) << (view * PS5_MEM_PAGES_PER_VIEW)))
+            return PS5_MEM_BUSY;
     }
     for (at = guest_address; at < end; at += PS5_MEM_VIEW_SIZE) {
         uint64_t base = at & ~(PS5_MEM_EXTENT_SIZE - 1);
