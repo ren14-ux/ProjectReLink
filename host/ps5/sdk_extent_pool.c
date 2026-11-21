@@ -30,6 +30,9 @@ Ps5SdkExtentResult ps5_sdk_extent_pool_init(Ps5SdkExtentPool *pool,
     pool->slots = slots;
     pool->capacity = capacity;
     pool->count = 0;
+    pool->guest_window_base = 0;
+    pool->guest_window_bytes = 0;
+    pool->guest_window_bound = 0;
     return PS5_SDK_EXTENT_OK;
 }
 
@@ -50,8 +53,11 @@ static int pool_contains_view(const Ps5SdkExtentPool *pool, uintptr_t address) {
         address < pool->guest_window_base ||
         address > UINTPTR_MAX - PS5_SDK_EXTENT_VIEW_BYTES)
         return 0;
-    return PS5_SDK_EXTENT_VIEW_BYTES <=
-           pool->guest_window_bytes - (size_t)(address - pool->guest_window_base);
+    {
+        const uintptr_t offset = address - pool->guest_window_base;
+        return offset <= pool->guest_window_bytes &&
+               PS5_SDK_EXTENT_VIEW_BYTES <= pool->guest_window_bytes - (size_t)offset;
+    }
 }
 
 Ps5SdkExtentResult ps5_sdk_extent_allocate(Ps5SdkExtentPool *pool, uint64_t *token_out) {
