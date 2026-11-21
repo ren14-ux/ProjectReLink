@@ -398,3 +398,8 @@ The remaining blocking work is therefore concrete:
 5. Add the PS5 source groups and startup/shutdown lifecycle to the real title build, then validate the 512 GiB reservation, direct-memory mapping, protection transitions, fault handling, and GPU import retirement on the target console.
 
 The diagnostic workflow and source changes do not close these gates. No build, test, or console validation is claimed.
+
+
+## Follow-up: native dirty-page bitmap width
+
+The native soft write-watch bitmap was smaller than the renderer's declared 512 GiB page table. It now uses one byte for each 4 KiB page across the full 512 GiB guest window (`1 << 27` bytes), and native store marking uses 64-bit guest-page indices instead of truncating addresses to 32 bits. The wasm32 bitmap remains sized for its 4 GiB address model. This resolves the source-level bitmap-size/index mismatch; it has not been compiled or exercised in this run.
