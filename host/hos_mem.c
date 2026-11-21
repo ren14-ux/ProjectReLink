@@ -204,7 +204,7 @@ static void discard_pages(uint64_t addr, uint64_t size) {
    made meanwhile; a region made since is not a gap, so a range freed and handed out again keeps its pages. Returns the bytes
    given back */
 uint64_t hos_region_release_gaps(uint64_t lo, uint64_t hi) {
-#if defined(_WIN32) && !defined(__EMSCRIPTEN__)
+#if defined(_WIN32) && !defined(A64_PS5) && !defined(__EMSCRIPTEN__)
     uint64_t done = 0;
     LOCK();
     const uint64_t floor = region_floor < HOS_SPACE_END ? region_floor : HOS_SPACE_END;
