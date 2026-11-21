@@ -1,27 +1,35 @@
-# PS5 guest-window reservation probe
+# PS5 guest-memory diagnostic title
 
-This is a standalone diagnostic ELF. It is deliberately separate from the
-ReLink PS5 application target, which remains guarded until its host services
-and RADV title link are integrated.
+The deliverable is a PS5 title directory, **not an ELF file**:
 
-## Build
-
-Use the exact SDK revision pinned in `../../deps/ps5-payload-sdk.commit`:
-
-```sh
-export PS5_PAYLOAD_SDK=/absolute/path/to/installed/ps5-payload-sdk
-make -C tools/ps5 clean all
+```
+dist/PPSA00000/
+├── eboot.bin
+├── sce_sys/
+│   └── param.json
+└── sce_module/
+    └── libc.prx
 ```
 
-The Makefile rejects a missing or mismatched SDK revision. The resulting
-`relink-guest-window-probe.elf` can be transferred to the console using the
-ELF loader appropriate to the installed jailbreak environment. Its output
-reports each reservation attempt and cleanup result.
+## Build requirements
 
-The diagnostic only reserves and releases virtual address ranges. It does not
-allocate direct memory, map guest pages, or modify ReLink's runtime state.
-A PASS establishes only that the tested reservation layout worked in this
-process at that time; it does not yet prove that the full emulator memory
-backend can use that layout.
+- `PS5_PAYLOAD_SDK`: installed SDK at the exact revision in `deps/ps5-payload-sdk.commit`
+- `PS5_NATIVE_TOOL`: executable `ps5-native-tool` from the PS5_Vulkan native title toolchain
+- `PS5_LIBC_PRX`: compatible `libc.prx` runtime module for this title
 
-No ReLink PS5 build guard is changed by this target.
+Build:
+
+```sh
+export PS5_PAYLOAD_SDK=/path/to/ps5-payload-sdk
+export PS5_NATIVE_TOOL=/path/to/ps5-native-tool
+export PS5_LIBC_PRX=/path/to/libc.prx
+make -C tools/ps5
+```
+
+Intermediate ELF files stay under `build/ps5-guest-probe/`; the installable
+folder is `dist/PPSA00000/`. The title ID is a development placeholder and
+must be checked against the user's installed title IDs before deployment.
+
+The app only tests virtual-address reservation and release. It does not yet
+test direct-memory allocation, GPU mapping, or the complete ReLink memory
+backend. The main ReLink PS5 build guard remains enabled.
