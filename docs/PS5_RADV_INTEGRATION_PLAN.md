@@ -113,3 +113,10 @@ The implementation bypasses the SDL window bridge in `start()` and continues thr
 ## Latest source correction
 
 The PS5 display functions are part of the `VKX_INSTANCE` dispatch macro in `gpu/vk/vk_loader.h`. The display-surface entry was missing a trailing macro continuation, which detached the subsequent surface-query functions from the macro and could break compilation. The continuation has been restored. This is a source inspection fix; no PS5 compile has been run.
+
+
+## PS5 renderer startup correction
+
+`host/rx_backend.c` now treats `RELINK_PS5_STATIC_VULKAN` as a single-renderer configuration: it calls the linked `mkwvk_init` directly, starts that renderer, and returns failure if either step fails. It no longer falls through to `wgr_start` (the desktop WebGPU backend) when the PS5 RADV renderer is unavailable. On a PS5 title, silently selecting a desktop fallback would be incorrect and could make renderer startup appear successful while no supported presentation path exists.
+
+This is a source-level control-flow correction only. The PS5 executable build still does not compile/link the renderer objects and RADV archive, and no PS5 build or runtime test has been performed.
