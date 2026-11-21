@@ -2694,6 +2694,13 @@ void bg_drain() {
     for (auto& [lo, p] : ready) {
         auto imp = imported.find(lo);
         if (imp != imported.end() && imp->second.hi >= p.hi) {
+#if defined(RELINK_PS5_RADV)
+            if (!ps5_import_release(p)) {
+                std::lock_guard lk(bg_mu);
+                bg_ready.push_back({lo, std::move(p)});
+                continue;
+            }
+#endif
             vkDestroyBuffer(dev.device, p.buffer, nullptr);
             vkFreeMemory(dev.device, p.memory, nullptr);
             for (VkDeviceMemory m : p.pieces) vkFreeMemory(dev.device, m, nullptr);
@@ -2712,6 +2719,13 @@ void bg_drain() {
         }
         if (overlap) {
             st_prefetch_dropped++;
+#if defined(RELINK_PS5_RADV)
+            if (!ps5_import_release(p)) {
+                std::lock_guard lk(bg_mu);
+                bg_ready.push_back({lo, std::move(p)});
+                continue;
+            }
+#endif
             vkDestroyBuffer(dev.device, p.buffer, nullptr);
             vkFreeMemory(dev.device, p.memory, nullptr);
             for (VkDeviceMemory m : p.pieces) vkFreeMemory(dev.device, m, nullptr);
@@ -3954,7 +3968,13 @@ std::deque<DeadMirror> dead_mirrors;
 // Forest ~1.3 GB of imports, 15-45 ms a submission (3-4 fps on an RX 7800 XT with 11 ms of GPU time; issues 312, 413). Its
 // table entries went at its retirement, and its mirror goes before (mstate), so once the GPU is past retired_value nothing
 // reaches it. The node stays (pointers to it are kept elsewhere); only its buffer and memory go. RX_VK_KEEP_RETIRED=1: kept
-struct DeadImport { VkBuffer buffer; VkDeviceMemory memory; uint64_t value; uint64_t bytes; std::vector<VkDeviceMemory> pieces; uint64_t lo = 0; };
+struct DeadImport {
+    VkBuffer buffer; VkDeviceMemory memory; uint64_t value; uint64_t bytes;
+    std::vector<VkDeviceMemory> pieces; uint64_t lo = 0;
+#if defined(RELINK_PS5_RADV)
+    bool ps5_import_held = false;
+#endif
+};
 std::deque<DeadImport> dead_imports;
 uint64_t st_retired_imports_freed = 0, st_retired_import_bytes_freed = 0;
 void release_uncovered(uint64_t lo, uint64_t hi);   // (below, with the imports given back under pressure)
@@ -3970,6 +3990,14 @@ void reap_mirrors() {   // (pools_mu held)
         dead_mirrors.pop_front();
     }
     while (!dead_imports.empty() && dead_imports.front().value <= mem_completed) {
+#if defined(RELINK_PS5_RADV)
+        if (dead_imports.front().ps5_import_held &&
+            ps5_memory_import_release(dead_imports.front().lo, dead_imports.front().bytes) != 0) {
+            logf("vk: PS5 retired import hold could not be released at %#llx",
+                 (unsigned long long)dead_imports.front().lo);
+            break;
+        }
+#endif
         vkDestroyBuffer(dev.device, dead_imports.front().buffer, nullptr);
         vkFreeMemory(dev.device, dead_imports.front().memory, nullptr);
         for (VkDeviceMemory m : dead_imports.front().pieces) vkFreeMemory(dev.device, m, nullptr);
@@ -4008,7 +4036,16 @@ void retired_imports_give_back() {   // (pools_mu held)
         if (!p.memory) continue;
         if (!keep && p.mstate == Pool::MIRROR_NONE && !p.inherit_pending && p.retired_value <= mem_completed &&
             p.last_value <= mem_completed) {
-            dead_imports.push_back({p.buffer, p.memory, std::max(mem_rec_value, p.last_value), p.hi - p.lo, std::move(p.pieces), p.lo});
+            dead_imports.push_back({p.buffer, p.memory, std::max(mem_rec_value, p.last_value), p.hi - p.lo,
+#if defined(RELINK_PS5_RADV)
+                                     std::move(p.pieces), p.lo, p.ps5_import_held
+#else
+                                     std::move(p.pieces), p.lo
+#endif
+            });
+#if defined(RELINK_PS5_RADV)
+            p.ps5_import_held = false;
+#endif
             p.pieces.clear();
             p.buffer = VK_NULL_HANDLE, p.memory = VK_NULL_HANDLE, p.address = 0;
             pools_gen++;
@@ -4128,7 +4165,7 @@ constexpr uint64_t kImportIdle = 600;
 int64_t st_released_calls = 0;
 uint64_t st_released_bytes = 0;
 void release_uncovered(uint64_t lo, uint64_t hi) {   // (pools_mu held)
-#ifdef _WIN32
+#if defined(_WIN32) || defined(RELINK_PS5_RADV)
     static const bool off = getenv("RX_VK_KEEP_FREED") || getenv("RX_VK_BG_IMPORT") ||
                             (getenv("RX_VK_PREFETCH_CHUNKS") && atoi(getenv("RX_VK_PREFETCH_CHUNKS")) > 0);
     if (off || !host->region_release_gaps || hi <= lo) return;
@@ -4193,6 +4230,9 @@ void released_drain() {   // (pools_mu held)
 void imports_give_back() {   // (pools_mu held)
     while (!evicted_pools.empty() && evicted_pools.front().mapped().retired_value <= mem_completed) {
         Pool& p = evicted_pools.front().mapped();
+#if defined(RELINK_PS5_RADV)
+        if (!ps5_import_release(p)) break;
+#endif
         vkDestroyBuffer(dev.device, p.buffer, nullptr);
         vkFreeMemory(dev.device, p.memory, nullptr);
         for (VkDeviceMemory m : p.pieces) vkFreeMemory(dev.device, m, nullptr);   // (a pool imported as several dma-bufs)
