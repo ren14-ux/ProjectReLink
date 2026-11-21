@@ -149,12 +149,70 @@ static void test_reserved_view_blocks_extent_release(void) {
     assert(ps5_mem_extent_retire(&state, base) == PS5_MEM_OK);
     assert(!ps5_mem_extent_release_ready(&state, base));
     assert(ps5_mem_extent_forget(&state, base, &handle) == PS5_MEM_BUSY);
-    /* Once the reservation is explicitly released by the platform, the
-       bookkeeping can drop it and allow backing release. */
+    /* Once this extent relinquishes its slice of the parent reservation,
+       bookkeeping can allow backing release; the parent window stays reserved. */
     assert(ps5_mem_view_reservation_released(&state, base) == PS5_MEM_OK);
     assert(ps5_mem_extent_release_ready(&state, base));
     assert(ps5_mem_extent_forget(&state, base, &handle) == PS5_MEM_OK);
     assert(handle == 31);
+}
+
+
+static void test_guest_page_ownership_and_import_lifetime(void) {
+    Ps5MemState state;
+    Ps5MemExtent storage[1];
+    const uint64_t base = 0x800000;
+    const uint64_t page = base + 0x1000;
+    uint8_t views = 0;
+    uint16_t pending = 0;
+
+    assert(ps5_mem_state_init(&state, storage, 1) == PS5_MEM_OK);
+    assert(ps5_mem_extent_add(&state, base, 41) == PS5_MEM_OK);
+
+    /* A 4 KiB page is tracked separately from its 16 KiB mapping view. */
+    assert(ps5_mem_pages_claim(&state, page, 0x1000) == PS5_MEM_OK);
+    assert(ps5_mem_pages_allocated_views(&state, base, &views) == PS5_MEM_OK);
+    assert(views == 1);
+    assert(ps5_mem_pages_zero_pending(&state, base, &pending) == PS5_MEM_OK);
+    assert(pending == 0x2);
+
+    /* The page cannot be declared initialized until its view is mapped. */
+    assert(ps5_mem_pages_mark_zeroed(&state, page, 0x1000) == PS5_MEM_STATE);
+    assert(ps5_mem_view_reserved(&state, base) == PS5_MEM_OK);
+    assert(ps5_mem_view_mapped(&state, base) == PS5_MEM_OK);
+    assert(ps5_mem_pages_mark_zeroed(&state, page, 0x1000) == PS5_MEM_OK);
+    assert(ps5_mem_pages_zero_pending(&state, base, &pending) == PS5_MEM_OK);
+    assert(pending == 0);
+
+    assert(ps5_mem_view_gpu_granted(&state, base) == PS5_MEM_OK);
+    assert(ps5_mem_import_acquire(&state, base, PS5_MEM_VIEW_SIZE) == PS5_MEM_OK);
+    /* A live import prevents ownership changes to any 4 KiB subpage in its view. */
+    assert(ps5_mem_pages_claim(&state, base, 0x1000) == PS5_MEM_BUSY);
+    assert(ps5_mem_pages_free(&state, page, 0x1000) == PS5_MEM_BUSY);
+    assert(ps5_mem_import_release(&state, base, PS5_MEM_VIEW_SIZE) == PS5_MEM_OK);
+    assert(ps5_mem_pages_free(&state, page, 0x1000) == PS5_MEM_OK);
+    assert(ps5_mem_extent_retire(&state, base) == PS5_MEM_OK);
+    assert(!ps5_mem_extent_release_ready(&state, base));
+
+    assert(ps5_mem_view_gpu_revoked(&state, base) == PS5_MEM_OK);
+    assert(ps5_mem_view_unmapped(&state, base) == PS5_MEM_OK);
+    assert(ps5_mem_view_reserved(&state, base) == PS5_MEM_OK);
+    assert(ps5_mem_view_reservation_released(&state, base) == PS5_MEM_OK);
+    assert(ps5_mem_extent_release_ready(&state, base));
+}
+
+static void test_page_claim_range_is_atomic(void) {
+    Ps5MemState state;
+    Ps5MemExtent storage[1];
+    uint8_t views = 0;
+    assert(ps5_mem_state_init(&state, storage, 1) == PS5_MEM_OK);
+    assert(ps5_mem_extent_add(&state, 0x900000, 51) == PS5_MEM_OK);
+
+    /* The range reaches an unregistered extent: the valid first page stays free. */
+    assert(ps5_mem_pages_claim(&state, 0x90f000, 0x2000) == PS5_MEM_NOT_FOUND);
+    assert(ps5_mem_pages_allocated_views(&state, 0x900000, &views) == PS5_MEM_OK);
+    assert(views == 0);
+    assert(ps5_mem_pages_claim(&state, 0x900001, 0x1000) == PS5_MEM_INVALID);
 }
 
 int main(void) {
@@ -164,5 +222,7 @@ int main(void) {
     test_cross_extent_import_lifecycle();
     test_unmap_requires_explicit_reservation_restore();
     test_reserved_view_blocks_extent_release();
+    test_guest_page_ownership_and_import_lifetime();
+    test_page_claim_range_is_atomic();
     return 0;
 }
