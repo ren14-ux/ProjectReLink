@@ -343,15 +343,24 @@ int ps5_memory_import_release(uint64_t guest_offset, uint64_t bytes) {
         return -1;
     }
     r = ps5_mem_backend_import_release(&service.state, absolute_address(begin), end - begin);
-    if (r == PS5_MEM_OK) {
-        for (extent_offset = begin & ~(PS5_MEM_EXTENT_SIZE - 1);
-             extent_offset < end; extent_offset += PS5_MEM_EXTENT_SIZE) {
-            r = reap_extent(absolute_address(extent_offset));
-            if (r != PS5_MEM_OK && r != PS5_MEM_NOT_FOUND) break;
-        }
+    if (r != PS5_MEM_OK) {
+        pthread_mutex_unlock(&memory_mutex);
+        return -1;
+    }
+    /*
+     * The import reference is now retired exactly once. If a later kernel
+     * unmap/release step fails, retain the extent and retry reaping on a later
+     * memory operation; do not ask the renderer to decrement the same hold twice.
+     */
+    for (extent_offset = begin & ~(PS5_MEM_EXTENT_SIZE - 1);
+         extent_offset < end; extent_offset += PS5_MEM_EXTENT_SIZE) {
+        const Ps5MemResult reap = reap_extent(absolute_address(extent_offset));
+        if (reap != PS5_MEM_OK && reap != PS5_MEM_NOT_FOUND)
+            hos_log("mem: deferred PS5 extent reap at %#llx (%d)",
+                    (unsigned long long)absolute_address(extent_offset), (int)reap);
     }
     pthread_mutex_unlock(&memory_mutex);
-    return r == PS5_MEM_OK || r == PS5_MEM_NOT_FOUND ? 0 : -1;
+    return 0;
 }
 
 int ps5_memory_shutdown(void) {
