@@ -1666,6 +1666,15 @@ static int game_main(int argc, char **argv) {
     }
     call_guest(c, hos_entry_nnMain, sp, "nnMain");
     hos_log("nnMain returned");
+#if defined(A64_PS5)
+    /* The service frees backing only after every renderer import hold has retired. */
+    if (ps5_memory_shutdown() == 0) {
+        if (ps5_guest_window_release(&ps5_guest_window) != PS5_GUEST_WINDOW_OK)
+            hos_log("mem: PS5 guest-window release failed; reservation remains owned until process exit");
+    } else {
+        hos_log("mem: PS5 guest-memory shutdown retained live extents; leaving the window reserved until process exit");
+    }
+#endif
     return 0;
 }
 
