@@ -25,6 +25,7 @@ typedef struct Ps5SdkExtentSlot {
     struct ps5_shm shm;
     uint32_t generation;
     void *views[PS5_SDK_EXTENT_VIEW_COUNT];
+    void *reservations[PS5_SDK_EXTENT_VIEW_COUNT];
     uint8_t reserved_mask;
     uint8_t mapped_mask;
     uint8_t occupied;
