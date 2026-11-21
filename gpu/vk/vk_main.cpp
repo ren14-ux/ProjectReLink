@@ -41,11 +41,24 @@ VKX_DEVICE3(VKX_DEFINE)
 
 static PFN_vkGetInstanceProcAddr get_instance_proc;
 
+#if defined(RELINK_PS5_RADV)
+// PS5 titles link RADV into the executable; there is no system Vulkan loader or
+// ICD to discover with LoadLibrary/dlopen. The PS5 RADV archive exports this
+// entry point, which fills the same dispatch table used by the desktop loaders.
+extern "C" VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL
+vk_icdGetInstanceProcAddr(VkInstance instance, const char* name);
+#endif
+
 bool load_global() {
+#if defined(RELINK_PS5_RADV)
+    get_instance_proc = reinterpret_cast<PFN_vkGetInstanceProcAddr>(vk_icdGetInstanceProcAddr);
+    if (!get_instance_proc) return false;
+#else
     HMODULE m = LoadLibraryA("vulkan-1.dll");   // (linux: libvulkan.so.1, host/posix/win32_posix.c)
     if (!m) return false;
     get_instance_proc = (PFN_vkGetInstanceProcAddr)(void*)GetProcAddress(m, "vkGetInstanceProcAddr");
     if (!get_instance_proc) return false;
+#endif
 #define VKX_LOAD(f) f = (PFN_##f)get_instance_proc(nullptr, #f);
     VKX_GLOBAL(VKX_LOAD)
 #undef VKX_LOAD
