@@ -56,8 +56,14 @@ typedef GuestContext Ctx;
 #ifdef A64_MEM_ZERO
 #define A64_MEM ((uint8_t *)0)
 #else
+#if defined(A64_PS5) && !defined(A64_HOST_BASE)
+#error "PS5 builds must define A64_HOST_BASE from a console-validated guest-window layout"
+#endif
 #ifndef A64_HOST_BASE
 #define A64_HOST_BASE 0x100000000000ULL   /* 16 TB: far from anything Windows or glibc map by default */
+#endif
+#if defined(A64_PS5) && ((A64_HOST_BASE & 0x3FFFULL) != 0)
+#error "A64_HOST_BASE must be aligned to the PS5 16 KiB virtual-page size"
 #endif
 #define A64_MEM ((uint8_t *)A64_HOST_BASE)
 #endif
