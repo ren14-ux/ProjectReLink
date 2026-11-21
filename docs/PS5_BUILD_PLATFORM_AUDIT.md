@@ -81,6 +81,22 @@ Do not begin by replacing the renderer with a native AGC backend. First evaluate
 
 The Vulkan compatibility direction is now **RADV-on-PS5 first**, subject to exact feature/limit and license checks. A native AGC backend remains a fallback only if a required ReLink feature cannot be supported or implemented on RADV.
 
+### Initial feature comparison against the published RADV gap ledger
+
+The published `mihawk-99/PS5_Vulkan/docs/CTS_GAPS.md` and its linked RADV integration notes report the following relevant behavior (the ledger is revision-specific and must be rechecked at the pinned revision used for a build):
+
+| ReLink dependency / behavior | Published PS5 RADV evidence | Port implication |
+| --- | --- | --- |
+| Dynamic rendering | Reported implemented; also demonstrated by the Vulkan Template sample | Strong match; still verify exact format/resolve usage in ReLink |
+| Synchronization2 and timeline semaphores | Reported implemented | Strong match for the three initial hard requirements |
+| Mesh/task shaders | Implemented through compute-based emulation on GFX10.3; task work is scheduled on the graphics ring, not an asynchronous compute queue | Potentially compatible, but performance and exact shader behavior need ReLink-specific validation |
+| External host memory | `VK_EXT_external_memory_host` reported implemented using the platform's memory protection path | Potentially replaces the desktop host-pointer import path; verify alignment, allocation flags, and pointer lifetime |
+| Sparse resources | Sparse binding/residency work is reported, but there is no dedicated sparse queue family and the queue topology differs from desktop | Do not assume the current sparse-buffer path works unchanged |
+| Queue topology | One graphics queue family; compute/transfer submissions are served from the graphics ring | ReLink's assumptions about queue families and asynchronous work need review |
+| Linux DMA-BUF / DRM / desktop surfaces | Explicitly listed as platform gaps, while PS5 VideoOut WSI is a separate path | Remove Linux DMA-BUF and desktop WSI assumptions from the PS5 build; use the PS5 display surface path |
+
+The above makes RADV a credible renderer target, not a drop-in backend. ReLink's `gpu/vk/vk_memory.cpp` has both external-host-memory and mirrored-memory paths, but its Linux DMA-BUF path is not a PS5 implementation. The PS5 build should select a supported host-memory path or a verified mirrored-buffer fallback, rather than compiling Linux ioctl/dma-buf code.
+
 ## What can be done without the SDK
 
 Source analysis, build-graph mapping, and isolated portable-code cleanup can proceed. A correct PS5 platform implementation, renderer integration, signed/packageable homebrew artifact, and meaningful build validation cannot be completed responsibly without the target toolchain and a working PS5 graphics/API reference.
