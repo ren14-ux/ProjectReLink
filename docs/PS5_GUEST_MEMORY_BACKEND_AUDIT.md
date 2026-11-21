@@ -240,14 +240,9 @@ The SDK source confirms the primitive calls and their granularity, but it does n
 
 ## Renderer dirty-page tracking is another PS5 integration gate
 
-The renderer's guest write-watch path is not currently safe to enable for the full PS5 guest window:
+At the time of the initial audit, the native dirty bitmap was only 1 MiB and used 32-bit indices. That source mismatch has since been corrected: `a64_dirty` is now `1 << 27` bytes for native builds, `A64_MARK` uses 64-bit guest-page indices, and `hos_mark_written()` walks the full `A64_DIRTY_PAGES` range. The wasm32 path remains at its 4 GiB size.
 
-- `gpu/render/rx_buffer.cpp` declares and scans `a64_dirty` as `1 << 27` bytes: one byte for each 4 KiB page in the 512 GiB guest window.
-- `third_party/a64-kit/rt/a64_rt.c` actually defines `a64_dirty` as only `1 << 20` bytes, and `third_party/a64-kit/rt/a64.h` indexes marks after truncating guest addresses to 32 bits. This is a first-4-GiB bitmap, not a 512-GiB bitmap.
-- `host/hos_mem.c:hos_mark_written()` likewise limits its page walk to `A64_DIRTY_PAGES`, whose current definition is the first 4 GiB.
-- The renderer uses these marks in `collect_written_pages()` to decide which guest pages need upload/synchronization. Its non-soft-write-watch fallback is platform write-watch behavior (Windows `GetWriteWatch`); that is not a PS5 implementation.
-
-Consequently, do not simply carry the desktop `A64_WRITE_TRACK` define into a PS5 build. Doing so would either leave guest writes above 4 GiB untracked or require changing the bitmap to a 128 MiB allocation and auditing every writer/reader and synchronization path. The renderer also needs a PS5-specific way to collect CPU-written pages that preserves its GPU coherency guarantees.
+This closes the bitmap-size/index mismatch in source, but does not prove incremental uploads on PS5. The PS5 renderer still needs a real build and console validation of every writer path and GPU coherency behavior.
 
 A future implementation should choose and document one explicit mechanism before enabling the renderer:
 1. a correctly sized 512-GiB page bitmap (128 MiB) with 64-bit guest page indexing and all lifted/runtime/host writers marking it; or
@@ -280,9 +275,9 @@ This establishes the next safe implementation boundary: a standalone metadata/li
 
 ## Standalone extent-state bookkeeping added
 
-`host/ps5/memory_state.h` and `host/ps5/memory_state.c` now provide a platform-independent metadata layer for the physical/view lifetime model. It deliberately makes no SDK calls and is not yet connected to `hos_commit`, `hos_region_free`, or Vulkan.
+`host/ps5/memory_state.h/.c` provide the platform-independent metadata layer. `host/ps5/sdk_extent_pool.c` and `memory_backend.c` provide the SDK adapter/coordinator, while `host/ps5/memory.c` now uses them for explicit page commit/decommit. `hos_mem.c` and `gpu/vk/vk_memory.cpp` have source-level integration points.
 
-The caller supplies a fixed metadata array; no heap allocation, mutex, or hidden global state is introduced. Each record represents one 64 KiB direct-memory extent and tracks its opaque backing handle, four 16 KiB CPU mapping bits, four GPU-grant bits, per-view import reference counts, and a pending-release flag.
+The state module itself owns no allocation, mutex, or hidden global state. The higher-level `memory.c` service owns dynamically grown metadata arrays and serializes operations with its memory mutex. Each record represents one 64 KiB direct-memory extent and tracks its opaque backing handle, four 16 KiB CPU mapping bits, four GPU-grant bits, per-view import reference counts, and a pending-release flag.
 
 The API enforces these transitions:
 
@@ -297,7 +292,7 @@ This is intentionally a bookkeeping primitive, not a memory allocator or kernel 
 - The caller must invoke each transition only after its corresponding SDK operation succeeds; this module cannot roll back a failed kernel operation.
 - The renderer must retain import holds until the GPU timeline confirms completion, then release those holds.
 - The caller remains responsible for serializing concurrent access to the state object.
-- No direct-memory allocation, fixed guest reservation, page mapping, GPU permission change, zeroing, decommit, or physical release is performed here.
+- The state module performs no direct-memory allocation or kernel mapping itself; those operations are now performed by the SDK extent pool and memory service.
 - The fixed metadata capacity must be chosen by the future backend and exhaustion must fail closed.
 
 The source is not yet included in a PS5 build source group and no production caller uses it. This creates a testable boundary for the next integration step without implying that PS5 guest memory is operational.
@@ -310,7 +305,7 @@ The source is not yet included in a PS5 build source group and no production cal
 sh host/ps5/run-memory-state-tests.sh
 ```
 
-The runner compiles the C implementation with C11, pedantic warnings, and warnings-as-errors in a temporary directory. It is a host-side unit test only; it does not validate SDK calls, GPU timeline integration, PS5 mapping semantics, or title startup. The PS5 preflight now requires both `memory_state.c` and `memory_state.h` as part of the eventual backend source set, while the actual `memory.c` adapter remains a separate missing prerequisite.
+The runner compiles the C implementation with C11, pedantic warnings, and warnings-as-errors in a temporary directory. It is a host-side unit test only; it does not validate SDK calls, GPU timeline integration, PS5 mapping semantics, or title startup. The PS5 preflight now requires `memory.c/.h`, `memory_state.c/.h`, `memory_backend.c/.h`, `sdk_extent_pool.c/.h`, and `guest_window.c/.h`. The preflight remains fail-closed because the complete title source groups and link/package path are not integrated.
 
 ## Pinned PayloadSDK shared-memory API contract
 
@@ -348,15 +343,15 @@ The platform kernel header declares `sceKernelAllocateDirectMemory`, `sceKernelR
 
 The adapter deliberately does not call `ps5_shm_create()` or `ps5_shm_destroy()`: the pinned SDK's destroy routine discards its descriptor regardless of the kernel release result. Instead, allocation is performed with `sceKernelAllocateDirectMemory()`, and release calls `sceKernelReleaseDirectMemory()` directly. The slot remains occupied and the token remains valid when release fails, allowing a caller to retry without losing the direct-memory start and size. On successful release, the descriptor is cleared and the slot becomes reusable.
 
-The pool is externally serialized; its new coordinator connection to `Ps5MemState` is described below, while renderer retirement is still separate. It now exposes exact fixed-address reservation, map, and unmap operations for each of the four 16 KiB views. Reservations and mappings are tracked separately per slot; a successful fixed map consumes the tracked reservation, and backing release is refused while either mask is nonzero. Reservation release uses the stored exact address and clears tracking only after `sceKernelMunmap` succeeds. Unmapping a mapped view leaves a hole; the caller must reserve it again if the guest arena requires a reserved hole. The caller must still enforce the extent-state release preconditions, including GPU permission revocation and Vulkan import retirement, before calling the pool's release function. A new `memory_backend` coordinator now combines the memory-state release predicate with the SDK pool release: it checks that the extent is retired and has no reservations, mappings, GPU grants, or Vulkan import holds; then it releases the direct-memory allocation and forgets the state entry. This helper requires the same external memory lock to remain held across the whole operation. The coordinator now also provides reserve, reservation-release, fixed-map, and unmap operations that pair the SDK pool with `Ps5MemState`. It now exposes range-based import acquire/release calls for Vulkan and an extent-retirement gate that rejects new imports before backing release. These operations require the shared external memory lock. Kernel reservation/map operations are paired with state transitions, and failed map rollback deliberately leaves a conservative state blocker if the kernel unmap also fails. GPU permission changes are now exposed through `sceKernelMprotect` wrappers and paired with the state machine. Granting GPU access preserves CPU read/write bits because the kernel protection call replaces the complete mask; revocation restores CPU read/write-only access. The state gate prevents revocation while Vulkan import holds remain. Unmapping currently leaves a hole rather than restoring a reservation automatically. The adapter source is not yet part of a PS5 compile group. The import acquire/release functions are currently callable bookkeeping wrappers only; they do not yet receive calls from `vk_memory.cpp`, and therefore do not yet hold real renderer imports. The pinned `ps5_shm_map()` implementation itself ignores a cleanup-unmap failure if its post-map `mprotect` fails; this adapter cannot currently distinguish that rare partial-failure state, so that SDK helper remains a mapping-path limitation. No SDK build or console runtime test has been performed.
+The pool is externally serialized and is coordinated with `Ps5MemState`. The higher-level memory service now receives renderer import acquire/release calls; those paths remain uncompiled and unvalidated on console. It now exposes exact fixed-address reservation, map, and unmap operations for each of the four 16 KiB views. Reservations and mappings are tracked separately per slot; a successful fixed map consumes the tracked reservation, and backing release is refused while either mask is nonzero. Reservation release uses the stored exact address and clears tracking only after `sceKernelMunmap` succeeds. Unmapping a mapped view leaves a hole; the caller must reserve it again if the guest arena requires a reserved hole. The caller must still enforce the extent-state release preconditions, including GPU permission revocation and Vulkan import retirement, before calling the pool's release function. A new `memory_backend` coordinator now combines the memory-state release predicate with the SDK pool release: it checks that the extent is retired and has no reservations, mappings, GPU grants, or Vulkan import holds; then it releases the direct-memory allocation and forgets the state entry. This helper requires the same external memory lock to remain held across the whole operation. The coordinator now also provides reserve, reservation-release, fixed-map, and unmap operations that pair the SDK pool with `Ps5MemState`. It now exposes range-based import acquire/release calls for Vulkan and an extent-retirement gate that rejects new imports before backing release. These operations require the shared external memory lock. Kernel reservation/map operations are paired with state transitions, and failed map rollback deliberately leaves a conservative state blocker if the kernel unmap also fails. GPU permission changes are now exposed through `sceKernelMprotect` wrappers and paired with the state machine. Granting GPU access preserves CPU read/write bits because the kernel protection call replaces the complete mask; revocation restores CPU read/write-only access. The state gate prevents revocation while Vulkan import holds remain. Unmapping currently leaves a hole rather than restoring a reservation automatically. The memory service and Vulkan import-hold calls now exist in source, but the service is not yet part of a complete PS5 title compile group. Import holds are acquired before host-pointer import and released only after the Vulkan allocation is destroyed at/after `mem_completed`. The pinned `ps5_shm_map()` helper still ignores a cleanup-unmap failure if its post-map `mprotect` fails; that SDK helper remains a mapping-path limitation. No SDK build or console runtime test has been performed.
 
 ### Remaining adapter blockers
 
 - A proven exact-address reservation path for the complete guest window.
 - Recovery logic for the SDK's unmap-then-reserve partial failure.
-- A production guest allocator that uses the coordinator from `hos_commit()`, `hos_region_free()`, and the explicit commit/decommit paths.
-- Calls from `gpu/vk/vk_memory.cpp` into the new import acquire/release wrappers; the wrappers currently have no renderer caller.
-- Renderer callbacks that release import references only after the GPU timeline reports completion.
+- A validated PS5 first-touch strategy for accesses that occur without an explicit HOS page allocation.
+- Integration of the new memory service and RADV sources into the real title source groups, link, and package path.
+- Console validation of mapping, GPU protection, and renderer retirement behavior.
 
 Until these are implemented, the SDK calls must not be wired into guest allocation/free paths.
 
@@ -371,7 +366,7 @@ The backend's mapping contract has been corrected to match the startup reservati
 - If the kernel unmap succeeds but the fixed reservation restoration fails, the slot records a separate `restore_mask`. The extent cannot be released or remapped until `ps5_sdk_extent_restore_view_reservation()` succeeds. The memory backend exposes a matching retry operation and updates state only after restoration succeeds.
 - Releasing a view's bookkeeping reservation does not unmap the parent guest window; it only relinquishes that extent slot's ownership record. The global guest-window owner remains responsible for the 512 GiB reservation.
 
-These changes fix the internal double-reservation mismatch in the coordinator. They do not establish that the full guest window can be reserved on every target firmware, nor do they implement the missing fault-driven first-touch path. The actual game allocator and renderer still do not call this backend.
+These changes fix the internal double-reservation mismatch. The explicit page service is now initialized from startup and called by the HOS allocator and Vulkan import path. They do not establish that the full guest window can be reserved on every target firmware or implement the missing fault-driven first-touch path.
 
 
 ## Follow-up: window binding, page ownership, and zero-on-first-map
