@@ -107,3 +107,12 @@ The RADV title reference also shows why a normal compiler-driver link is not eno
 - `ps5_linker()` resolves the SDK's `prospero-lld`.
 
 These helpers are intentionally not wired into the normal compile loop yet. The current source selection and final link still assume the desktop host/runtime, a separate renderer library, and desktop dependency caches. The existing fail-fast guard remains until a PS5-specific source set and title-link implementation replace those assumptions.
+
+
+## Follow-up implementation: SDK discovery and WSI failure cleanup
+
+The target toolchain now provides `ps5_sdk_root()`, `ps5_compiler()` and `ps5_linker()`. SDK discovery requires `PS5_PAYLOAD_SDK`, verifies the installed `.ps5-sdk-revision` against ReLink's committed pin, and checks for the PS5 C/C++ wrappers, linker, sysroot headers, `libps5platform.a`, `libc++.a`, `libc++abi.a` and `libunwind.a`. This is a reusable discovery layer; it is not yet connected to the build's compile/link loops because those loops still select desktop host sources and shared renderer outputs.
+
+The guarded PS5 Vulkan startup path now has a partial-failure cleanup routine. If display-surface creation, present-support validation, swapchain creation or renderer startup fails, it waits for the device, destroys any created swapchain semaphores and swapchain, clears swapchain state, and destroys the display surface. This addresses startup rollback only; it is not a complete renderer shutdown implementation.
+
+No PS5 compile or console test has been run.
