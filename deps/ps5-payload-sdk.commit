@@ -1,0 +1,5 @@
+# PS5 Payload SDK fork pin for the PS5 RADV integration.
+# Source: https://github.com/mihawk-99/PS5_PayloadSDK
+# Exact revision currently pinned by PS5_Vulkan/tools/setup-native-dependencies.sh.
+# This is the SDK fork revision used with the v0.42 upstream payload SDK release.
+b83202be73e930050e00de0f1b4d9ec46c0391bf
