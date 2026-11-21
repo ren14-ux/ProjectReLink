@@ -43,6 +43,7 @@ import rtgen
 import logo_rgba
 import fonts_embed
 import toolchain
+import ps5_build
 import version
 import win_manifest
 
@@ -61,7 +62,7 @@ PGO = os.environ.get("RX_PGO", "")
 # PS5 is intentionally rejected until its dedicated source set and title link are implemented.
 # Without this guard, RX_TARGET=ps5 would be mistaken for desktop Linux and produce the wrong artifacts.
 if toolchain.ps5():
-    raise SystemExit("RX_TARGET=ps5 is not buildable yet: PS5 host/platform sources and the static RADV title link are not integrated.")
+    ps5_build.preflight(os.path.abspath(os.path.join(kit.HERE, "..")), toolchain)
 
 LINUX = not toolchain.windows()   # (relink: RX_TARGET=windows on Linux builds the Windows game, with llvm-mingw)
 POSIX = os.path.join(kit.HERE, "..", "host", "posix")
