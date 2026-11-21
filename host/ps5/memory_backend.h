@@ -31,6 +31,10 @@ Ps5MemResult ps5_mem_backend_release_view_reservation(Ps5MemState *state,
                                                        Ps5SdkExtentPool *pool,
                                                        uint64_t guest_base,
                                                        unsigned view_index);
+Ps5MemResult ps5_mem_backend_restore_view_reservation(Ps5MemState *state,
+                                                       Ps5SdkExtentPool *pool,
+                                                       uint64_t guest_base,
+                                                       unsigned view_index);
 Ps5MemResult ps5_mem_backend_map_view(Ps5MemState *state, Ps5SdkExtentPool *pool,
                                       uint64_t guest_base, unsigned view_index,
                                       void *address, int protection, void **view_out);
