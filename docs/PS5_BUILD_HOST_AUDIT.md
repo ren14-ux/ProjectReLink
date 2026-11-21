@@ -28,7 +28,7 @@ The next implementation unit must be a dedicated PS5 platform layer plus a PS5 b
 - `native_link()`: Windows linker/runtime behavior; no PS5 linker recipe.
 - `find()`: emsdk clang/LLVM or PATH discovery, with llvm-mingw special handling.
 
-There is no PS5 compiler target, SDK root discovery, SDK wrapper selection, sysroot, linker script, PS5 import-library handling, package/signing tool discovery or PS5 runtime-library configuration. The exact PS5 SDK and RADV pins are recorded in `deps/ps5-payload-sdk.commit`, `deps/ps5-mesa.commit` and `docs/PS5_PAYLOAD_SDK.md`; pins alone do not supply the installed SDK or built RADV archive.
+There is no PS5 compiler target, SDK root discovery, SDK wrapper selection, sysroot, linker script, PS5 import-library handling, package/signing tool discovery or PS5 runtime-library configuration in ReLink's `toolchain.py`. The pinned SDK itself does contain the PS5 platform layer: its `platform/tools/setup-sdk.sh` installs the upstream v0.42 payload SDK plus `libps5platform.a` and `include/ps5platform`, and records the pinned revision. Its `host/bin/prospero-clang` and `prospero-clang++` wrappers select `x86_64-sie-ps5`, the SDK sysroot and PS5 runtime defaults. ReLink currently does not discover or invoke those wrappers. The exact PS5 SDK and RADV pins are recorded in `deps/ps5-payload-sdk.commit`, `deps/ps5-mesa.commit` and `docs/PS5_PAYLOAD_SDK.md`; pins alone do not supply the installed SDK or built RADV archive.
 
 ## Host-platform facts
 
@@ -84,3 +84,16 @@ These files need per-API classification against the pinned PS5 SDK. Some may be 
 ## Current status
 
 The PS5 Vulkan dispatch, display-surface path and static renderer-loader seam are present behind compile-time guards. The PS5 build target, host entry point/platform services and in-process renderer/RADV final link are not implemented. No build or hardware test is claimed.
+
+
+## Verified pinned SDK and title-link details
+
+The exact ReLink SDK pin `b83202be73e930050e00de0f1b4d9ec46c0391bf` was checked directly in the SDK repository:
+- The pinned tree includes `platform/`, `platform/tools/setup-sdk.sh`, `platform/Makefile`, `platform/include/ps5platform/` and `platform/src/`.
+- Its setup script installs the upstream **v0.42** release, verifies the release archive digest, installs the fork's compiler wrappers and platform layer, then records the exact fork revision in `.ps5-sdk-revision`.
+- Its `prospero-clang` wrapper selects `-target x86_64-sie-ps5`, the SDK sysroot and include/library paths, and adds PS5 CRT/kernel/libc defaults. The C++ wrapper also adds the SDK's libc++/libc++abi/unwind defaults and enables RTTI/exceptions unless overridden.
+- The platform layer builds `target/lib/libps5platform.a`; its heap and libc APIs are designed to be linked/wrapped by titles.
+
+This means the existing SDK pin is **not missing the platform layer**. The apparent discrepancy came from the pinned top-level README being the upstream SDK README; the fork's `platform/README.md` and setup script document the platform overlay. The pin is consistent with the RADV setup script's stated v0.42 base.
+
+The RADV title reference also shows why a normal compiler-driver link is not enough: its title script calls `prospero-lld` with a PS5 PIE unwind linker script, the title CRT/runtime objects, AGC import stubs, the whole RADV archive, grouped SDK C++/builtins/platform archives, the RADV platform wrappers and version maps. It then runs the PS5 title link/conversion tool and signs the output as `eboot.bin`. ReLink must adapt that exact flow while retaining its own entry point, runtime and imports; the template's test-title objects cannot simply be copied into ReLink.
