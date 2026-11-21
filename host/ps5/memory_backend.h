@@ -36,6 +36,11 @@ Ps5MemResult ps5_mem_backend_map_view(Ps5MemState *state, Ps5SdkExtentPool *pool
                                       void *address, int protection, void **view_out);
 Ps5MemResult ps5_mem_backend_unmap_view(Ps5MemState *state, Ps5SdkExtentPool *pool,
                                         uint64_t guest_base, unsigned view_index);
+Ps5MemResult ps5_mem_backend_grant_gpu_view(Ps5MemState *state, Ps5SdkExtentPool *pool,
+                                            uint64_t guest_base, unsigned view_index,
+                                            int protection);
+Ps5MemResult ps5_mem_backend_revoke_gpu_view(Ps5MemState *state, Ps5SdkExtentPool *pool,
+                                             uint64_t guest_base, unsigned view_index);
 
 /*
  * Release a retired extent only after reservations, CPU mappings, GPU grants,
