@@ -21,7 +21,7 @@ extern "C" {
 #define PS5_MEM_NO_HANDLE UINT64_MAX
 
 typedef struct Ps5MemExtent {
-    uint64_t guest_base;       /* 64 KiB aligned guest offset */
+    uint64_t guest_base;       /* 64 KiB aligned absolute guest virtual address */
     uint64_t backing_handle;   /* opaque SDK direct-memory handle */
     uint32_t import_refs[PS5_MEM_VIEWS_PER_EXTENT];
     uint8_t reserved_mask;     /* address-space views reserved and available to map */
