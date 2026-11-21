@@ -42,6 +42,14 @@ Ps5MemResult ps5_mem_backend_grant_gpu_view(Ps5MemState *state, Ps5SdkExtentPool
 Ps5MemResult ps5_mem_backend_revoke_gpu_view(Ps5MemState *state, Ps5SdkExtentPool *pool,
                                              uint64_t guest_base, unsigned view_index);
 
+/* Vulkan imports hold every covered 16 KiB guest view until the import is retired. */
+Ps5MemResult ps5_mem_backend_import_acquire(Ps5MemState *state,
+                                            uint64_t guest_address, uint64_t bytes);
+Ps5MemResult ps5_mem_backend_import_release(Ps5MemState *state,
+                                            uint64_t guest_address, uint64_t bytes);
+/* Stop new imports before waiting for existing GPU/import references to drain. */
+Ps5MemResult ps5_mem_backend_retire_extent(Ps5MemState *state, uint64_t guest_base);
+
 /*
  * Release a retired extent only after reservations, CPU mappings, GPU grants,
  * and Vulkan import holds have all drained. The state entry is forgotten only
