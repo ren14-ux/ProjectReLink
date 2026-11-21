@@ -33,9 +33,11 @@ A correct backend needs to preserve the fixed 16 TiB base and 512 GiB guest addr
 
 ## Vulkan memory is a separate unresolved gate
 
-The existing renderer's Linux fast path is a memfd/udmabuf DMA-BUF import. Its fallback is `VK_EXT_external_memory_host`, which imports ordinary host pointers. Neither mechanism can be assumed to work for PS5 direct-memory mappings.
+The existing renderer's Linux fast path is a memfd/udmabuf DMA-BUF import and must not be compiled for PS5. The pinned PS5 RADV winsys does, however, implement a separate host-pointer import path: `radv_ps5_buffer_from_ptr()` accepts an aligned application-owned pointer, calls `radv_ps5_memory_grant_gpu()`, and retains only a wrapper because the application's memory remains its own. The grant function calls `sceKernelMprotect()` with CPU read/write and GPU read/write protections. The PS5 winsys requires the pointer and size to be aligned to its 16 KiB page size and the range to fit below its GPU address limit.
 
-The pinned SDK exposes GPU mapping protection constants, but its shared-memory convenience API currently requests CPU protections only. Before implementing the guest allocator or selecting the renderer path, inspect the pinned RADV PS5 winsys and prove how a title's direct-memory pages become GPU accessible and how RADV imports/retains them. Do not route PS5 through the Linux udmabuf code or silently assume host-pointer imports are equivalent.
+This is the concrete renderer integration route for ReLink's guest pages, subject to confirming the exact pinned driver revision and runtime behavior. ReLink's fixed 16 TiB guest base is below the winsys' 2^47 address ceiling, and its 512 GiB window remains below that ceiling. The guest backend should map CPU-accessible direct memory at the fixed guest addresses, then let the RADV import path grant GPU access; the import alignment must remain at least 16 KiB. The SDK's shared-memory convenience API currently requests CPU protections only, which is consistent with this sequence, but its mapping/unmapping lifetime still needs to be coordinated with RADV imports.
+
+Do not route PS5 through Linux udmabuf. Do not release or remap a guest extent while RADV still owns an imported buffer for it.
 
 ## Decision
 
