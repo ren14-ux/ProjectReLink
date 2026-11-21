@@ -272,3 +272,27 @@ PS5 backend requirements derived from this lifecycle:
 6. Keep the PS5 state manager's transitions transactional: if any kernel map/unmap/protection call fails, retain enough state to retry or roll back without claiming the extent was released.
 
 This establishes the next safe implementation boundary: a standalone metadata/lifetime layer can track extent and view state, but the production adapter must receive explicit GPU-retirement notifications from the renderer before it can call `sceKernelReleaseDirectMemory`. No direct-memory release callback is wired to the existing renderer today.
+
+## Standalone extent-state bookkeeping added
+
+`host/ps5/memory_state.h` and `host/ps5/memory_state.c` now provide a platform-independent metadata layer for the physical/view lifetime model. It deliberately makes no SDK calls and is not yet connected to `hos_commit`, `hos_region_free`, or Vulkan.
+
+The caller supplies a fixed metadata array; no heap allocation, mutex, or hidden global state is introduced. Each record represents one 64 KiB direct-memory extent and tracks its opaque backing handle, four 16 KiB CPU mapping bits, four GPU-grant bits, per-view import reference counts, and a pending-release flag.
+
+The API enforces these transitions:
+
+- A view can be marked mapped only once and only while its extent is not retiring.
+- GPU permission can be recorded only for a mapped view. It must be revoked before unmapping.
+- An import range must be nonempty and 16 KiB aligned. The entire range is validated before any reference count changes; every covered view must already be mapped and GPU-granted, and retiring extents reject new imports.
+- Import release validates the entire range before decrementing any count, so an invalid or duplicate release cannot partially drop a hold.
+- An extent can be forgotten only after it is marked for retirement and all four views are unmapped, all GPU grants are revoked, and all import holds are zero. The caller receives the backing handle only at that point.
+
+This is intentionally a bookkeeping primitive, not a memory allocator or kernel adapter. In particular:
+
+- The caller must invoke each transition only after its corresponding SDK operation succeeds; this module cannot roll back a failed kernel operation.
+- The renderer must retain import holds until the GPU timeline confirms completion, then release those holds.
+- The caller remains responsible for serializing concurrent access to the state object.
+- No direct-memory allocation, fixed guest reservation, page mapping, GPU permission change, zeroing, decommit, or physical release is performed here.
+- The fixed metadata capacity must be chosen by the future backend and exhaustion must fail closed.
+
+The source is not yet included in a PS5 build source group and no production caller uses it. This creates a testable boundary for the next integration step without implying that PS5 guest memory is operational.
