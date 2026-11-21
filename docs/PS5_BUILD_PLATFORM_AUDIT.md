@@ -55,6 +55,32 @@ The README currently lists an AVX2-capable PC CPU as a requirement. `nx2/build.p
 
 The Vulkan feature inventory remains a separate blocker. The current backend requests Vulkan 1.3 and depends on dynamic rendering, synchronization2, timeline semaphores, buffer device address, and platform presentation integration, among other optional/conditional features. A PS5 GPU's hardware capability alone does not provide a Vulkan loader, ICD, surface implementation, or matching extension behavior in the Wobkot runtime. Each must be demonstrated by the actual SDK/runtime.
 
+## Newly identified PS5 Vulkan path (research update, 2026-11-21)
+
+Public PS5 homebrew work changes the graphics assessment materially:
+
+- `mihawk-99/PS5_VulkanTemplate` documents a native x86-64 PS5 title using RADV (Mesa) linked into the title, with PS5 VideoOut presentation through `VK_KHR_display`. Its documented stack separates the PS5 payload/platform SDK, PS5 Mesa/winsys, RADV build/link tooling, and the title. The template reports working samples including dynamic rendering and mesh shaders. This is a much stronger starting point than assuming a stock system Vulkan loader exists.
+- `mpereiraesaa/ps5-vulkan` documents an experimental gfx1013 Vulkan 1.3 implementation with dynamic rendering, synchronization2, timeline semaphores, and native VideoOut presentation. It explicitly documents bounded support and non-conformance; its own README says there is no Vulkan loader/ICD and native builds need its PS5 payload SDK plus companion graphics support library.
+- The PS5_VulkanTemplate documentation says RADV is linked into each title; a title cannot simply load a system Vulkan driver. This matters because ReLink currently dynamically loads `mkw_vk.dll` / `relink_vk.so`. A PS5 integration likely needs a statically linked renderer/driver arrangement or an in-process loader shim, not the existing desktop DLL loading path.
+
+These repositories are external technical references, not dependencies already present in this fork. Their reported hardware results are claims from their maintainers; they do not establish that ReLink's workload is compatible.
+
+### Corrected CPU note
+
+The PS5 CPU target is x86-64. The earlier statement in this document that the PS5 CPU is AArch64 was incorrect and is superseded. ReLink's x86-oriented code and AVX2 assumptions therefore need validation against the PS5 toolchain/ABI, but a wholesale ARM64 port is not the task. The toolchain still needs a PS5-specific target (the cited template documents `x86_64-sie-ps5`), startup/runtime integration, and platform libraries.
+
+### Revised graphics investigation
+
+Do not begin by replacing the renderer with a native AGC backend. First evaluate the existing Vulkan backend against the PS5 RADV stack:
+
+1. Obtain/pin the PS5_VulkanTemplate stack and its compatible PS5 payload SDK / RADV build as external build dependencies; inspect their exact license and revision requirements before integration.
+2. Compare ReLink's required and optional Vulkan features with the target RADV feature/limit report, not just the advertised API version. In particular check mesh/task shader behavior, buffer device address, external-memory import, sparse binding, descriptor/pipeline features, subgroup-size behavior, and all shader-stage/format requirements.
+3. Replace desktop surface creation with the PS5 VideoOut WSI path and ensure ReLink's renderer is linked in the way RADV expects.
+4. Replace or adapt the desktop shared-library boundary in `host/rx_backend.c`; do not assume `dlopen` of a separately built Vulkan DLL works in the PS5 title environment.
+5. Build a minimal ReLink renderer smoke target first, then integrate NVN replay. A Vulkan 1.3 version string alone is not acceptance evidence.
+
+The Vulkan compatibility direction is now **RADV-on-PS5 first**, subject to exact feature/limit and license checks. A native AGC backend remains a fallback only if a required ReLink feature cannot be supported or implemented on RADV.
+
 ## What can be done without the SDK
 
 Source analysis, build-graph mapping, and isolated portable-code cleanup can proceed. A correct PS5 platform implementation, renderer integration, signed/packageable homebrew artifact, and meaningful build validation cannot be completed responsibly without the target toolchain and a working PS5 graphics/API reference.
