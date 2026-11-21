@@ -71,9 +71,54 @@ static void test_extent_capacity_and_boundaries(void) {
     assert(ps5_mem_extent_release_ready(&state, 0x300000));
 }
 
+
+static void test_cross_extent_import_lifecycle(void) {
+    Ps5MemState state;
+    Ps5MemExtent storage[2];
+    const uint64_t first = 0x500000;
+    const uint64_t second = first + PS5_MEM_EXTENT_SIZE;
+    unsigned i;
+
+    assert(ps5_mem_state_init(&state, storage, 2) == PS5_MEM_OK);
+    assert(ps5_mem_extent_add(&state, first, 11) == PS5_MEM_OK);
+    assert(ps5_mem_extent_add(&state, second, 12) == PS5_MEM_OK);
+
+    /* Map and grant the last view of extent one and first view of extent two. */
+    assert(ps5_mem_view_mapped(&state, first + 3 * PS5_MEM_VIEW_SIZE) == PS5_MEM_OK);
+    assert(ps5_mem_view_gpu_granted(&state, first + 3 * PS5_MEM_VIEW_SIZE) == PS5_MEM_OK);
+    assert(ps5_mem_view_mapped(&state, second) == PS5_MEM_OK);
+    assert(ps5_mem_view_gpu_granted(&state, second) == PS5_MEM_OK);
+
+    /* One import spanning the boundary must hold both extents atomically. */
+    assert(ps5_mem_import_acquire(&state, first + 3 * PS5_MEM_VIEW_SIZE,
+                                  2 * PS5_MEM_VIEW_SIZE) == PS5_MEM_OK);
+    assert(ps5_mem_extent_retire(&state, first) == PS5_MEM_OK);
+    assert(ps5_mem_extent_retire(&state, second) == PS5_MEM_OK);
+    assert(!ps5_mem_extent_release_ready(&state, first));
+    assert(!ps5_mem_extent_release_ready(&state, second));
+
+    assert(ps5_mem_import_release(&state, first + 3 * PS5_MEM_VIEW_SIZE,
+                                  2 * PS5_MEM_VIEW_SIZE) == PS5_MEM_OK);
+    assert(ps5_mem_import_release(&state, first + 3 * PS5_MEM_VIEW_SIZE,
+                                  2 * PS5_MEM_VIEW_SIZE) == PS5_MEM_STATE);
+
+    for (i = 0; i < 2; ++i) {
+        uint64_t view = i == 0 ? first + 3 * PS5_MEM_VIEW_SIZE : second;
+        uint64_t base = i == 0 ? first : second;
+        uint64_t handle = 0;
+        assert(ps5_mem_view_gpu_revoked(&state, view) == PS5_MEM_OK);
+        assert(ps5_mem_view_unmapped(&state, view) == PS5_MEM_OK);
+        assert(ps5_mem_extent_release_ready(&state, base));
+        assert(ps5_mem_extent_forget(&state, base, &handle) == PS5_MEM_OK);
+        assert(handle == (i == 0 ? 11u : 12u));
+    }
+    assert(state.count == 0);
+}
+
 int main(void) {
     test_extent_lifecycle();
     test_atomic_range_validation();
     test_extent_capacity_and_boundaries();
+    test_cross_extent_import_lifecycle();
     return 0;
 }
