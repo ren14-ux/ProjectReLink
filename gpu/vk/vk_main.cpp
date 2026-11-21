@@ -1298,8 +1298,7 @@ static bool create_ps5_display_surface(uint32_t* out_width, uint32_t* out_height
     if (!mode.visibleRegion.width || !mode.visibleRegion.height) return false;
 
     VkDisplayPlaneCapabilitiesKHR plane_caps{};
-    r = vkGetDisplayPlaneCapabilitiesKHR(dev.physical, modes[selected_mode].displayMode, selected_plane,
-                                         planes[selected_plane].currentStackIndex, &plane_caps);
+    r = vkGetDisplayPlaneCapabilitiesKHR(dev.physical, modes[selected_mode].displayMode, selected_plane, &plane_caps);
     if (r != VK_SUCCESS) {
         logf("vk: PS5: querying display-plane capabilities failed (%d)", (int)r);
         return false;
@@ -1308,8 +1307,11 @@ static bool create_ps5_display_surface(uint32_t* out_width, uint32_t* out_height
     si.displayMode = modes[selected_mode].displayMode;
     si.planeIndex = selected_plane;
     si.planeStackIndex = planes[selected_plane].currentStackIndex;
-    si.transform = plane_caps.supportedTransforms & VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR
-                       ? VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR : plane_caps.currentTransform;
+    if (!(displays[0].supportedTransforms & VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR)) {
+        logf("vk: PS5: display does not support the identity surface transform");
+        return false;
+    }
+    si.transform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
     si.globalAlpha = 1.0f;
     si.alphaMode = plane_caps.supportedAlpha & VK_DISPLAY_PLANE_ALPHA_OPAQUE_BIT_KHR
                        ? VK_DISPLAY_PLANE_ALPHA_OPAQUE_BIT_KHR : VK_DISPLAY_PLANE_ALPHA_GLOBAL_BIT_KHR;
