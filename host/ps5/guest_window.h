@@ -4,7 +4,8 @@
 /*
  * Exact ownership of the guest virtual-address window.
  *
- * The caller supplies a console-validated base and size. This module never
+ * Zero-initialize Ps5GuestWindow before first use. The caller supplies a
+ * console-validated base and size. This module never
  * selects a guessed address and never treats a relocated reservation as
  * success. Calls must be externally serialized.
  */
