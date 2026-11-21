@@ -45,9 +45,24 @@ def preflight(root, toolchain):
     if not os.path.isfile(linker_script):
         errors.append("missing PS5 PIE linker script: " + linker_script)
 
-    title_tool = os.path.join(vulkan_root, "build", "runtime-shim", "ps5-native-tool")
-    if not os.path.isfile(title_tool):
-        errors.append("missing PS5 title conversion/signing tool: " + title_tool)
+    package_script = os.path.join(root, "tools", "ps5", "build-title.sh")
+    title_params = os.path.join(root, "tools", "ps5", "param.json")
+    native_wrapper = os.path.join(vulkan_root, "tooling", "prospero-clang18")
+    native_crt = os.path.join(vulkan_root, "tooling", "native", "app_crt.cpp")
+    native_symbols = os.path.join(vulkan_root, "tooling", "native", "app-symbols.map")
+    for path, label in (
+        (package_script, "PS5 title packaging script"),
+        (title_params, "PS5 title param.json"),
+        (native_wrapper, "PS5 native compiler wrapper"),
+        (native_crt, "PS5 title startup object source"),
+        (native_symbols, "PS5 title export map"),
+    ):
+        if not os.path.isfile(path):
+            errors.append("missing " + label + ": " + path)
+
+    # build-title.sh rebuilds the native converter/runtime when their checked
+    # outputs are absent, so the converter executable itself is not a preflight
+    # requirement. Its inputs and the package script are.
 
     if errors:
         raise SystemExit(
