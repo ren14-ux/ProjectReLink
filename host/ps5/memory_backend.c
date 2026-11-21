@@ -136,6 +136,52 @@ Ps5MemResult ps5_mem_backend_unmap_view(Ps5MemState *state, Ps5SdkExtentPool *po
     return PS5_MEM_OK;
 }
 
+Ps5MemResult ps5_mem_backend_grant_gpu_view(Ps5MemState *state, Ps5SdkExtentPool *pool,
+                                            uint64_t guest_base, unsigned view_index,
+                                            int protection) {
+    uint64_t token, address;
+    Ps5MemResult sr;
+    Ps5SdkExtentResult kr;
+    if (!state || !pool || view_index >= PS5_MEM_VIEWS_PER_EXTENT ||
+        (guest_base & (PS5_MEM_EXTENT_SIZE - 1)))
+        return PS5_MEM_INVALID;
+    address = guest_base + (uint64_t)view_index * PS5_MEM_VIEW_SIZE;
+    sr = backend_get_token(state, guest_base, &token);
+    if (sr != PS5_MEM_OK) return sr;
+    kr = ps5_sdk_extent_set_gpu_access(pool, token, view_index, protection);
+    if (kr != PS5_SDK_EXTENT_OK)
+        return kr == PS5_SDK_EXTENT_STALE ? PS5_MEM_NOT_FOUND : PS5_MEM_STATE;
+    sr = ps5_mem_view_gpu_granted(state, address);
+    if (sr != PS5_MEM_OK) {
+        /* Do not expose a GPU grant that the state machine did not accept. */
+        (void)ps5_sdk_extent_revoke_gpu_access(pool, token, view_index);
+        return sr;
+    }
+    return PS5_MEM_OK;
+}
+
+Ps5MemResult ps5_mem_backend_revoke_gpu_view(Ps5MemState *state, Ps5SdkExtentPool *pool,
+                                             uint64_t guest_base, unsigned view_index) {
+    uint64_t token, address;
+    Ps5MemResult sr;
+    Ps5SdkExtentResult kr;
+    if (!state || !pool || view_index >= PS5_MEM_VIEWS_PER_EXTENT ||
+        (guest_base & (PS5_MEM_EXTENT_SIZE - 1)))
+        return PS5_MEM_INVALID;
+    address = guest_base + (uint64_t)view_index * PS5_MEM_VIEW_SIZE;
+    sr = backend_get_token(state, guest_base, &token);
+    if (sr != PS5_MEM_OK) return sr;
+    /* The state gate refuses revocation while any Vulkan import still holds the view. */
+    sr = ps5_mem_view_gpu_revoked(state, address);
+    if (sr != PS5_MEM_OK) return sr;
+    kr = ps5_sdk_extent_revoke_gpu_access(pool, token, view_index);
+    if (kr != PS5_SDK_EXTENT_OK) {
+        (void)ps5_mem_view_gpu_granted(state, address);
+        return PS5_MEM_BUSY;
+    }
+    return PS5_MEM_OK;
+}
+
 Ps5MemResult ps5_mem_backend_release_extent(Ps5MemState *state,
                                             Ps5SdkExtentPool *pool,
                                             uint64_t guest_base) {
