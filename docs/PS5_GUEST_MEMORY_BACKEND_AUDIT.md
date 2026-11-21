@@ -372,3 +372,29 @@ The backend's mapping contract has been corrected to match the startup reservati
 - Releasing a view's bookkeeping reservation does not unmap the parent guest window; it only relinquishes that extent slot's ownership record. The global guest-window owner remains responsible for the 512 GiB reservation.
 
 These changes fix the internal double-reservation mismatch in the coordinator. They do not establish that the full guest window can be reserved on every target firmware, nor do they implement the missing fault-driven first-touch path. The actual game allocator and renderer still do not call this backend.
+
+
+## Follow-up: window binding, page ownership, and zero-on-first-map
+
+The coordinator now has additional safeguards:
+
+- The extent pool must be explicitly bound to the successfully reserved parent guest window before any fixed view can be adopted or mapped. View ranges are checked against that window with overflow-safe bounds.
+- Extent registration rejects guest addresses outside the bound window. Guest extent addresses in the state/backend APIs are absolute guest virtual addresses, not offsets from the window.
+- The 4 KiB page state exposes idempotent claim-missing and allocated-page-mask operations, plus snapshots of each view's reservation, mapping, GPU grant, and import-reference state. This is groundwork for a retryable page service; it is not yet the game's allocator.
+- A view is zeroed across its full 16 KiB range on its first mapping, before the mapping is published to the guest. Its initialized bit survives unmap/remap while the backing extent remains alive, and is reset when the slot is released and reused. Newly claimed 4 KiB pages still require their pending-zero transition to be completed before GPU import.
+
+The PS5 workflow now runs its guest-window diagnostic job when any `host/ps5/**`, `gpu/vk/vk_memory.cpp`, HOS memory/startup, build-preflight, or guest-pointer runtime files change. That workflow remains a diagnostic title-folder build, not a ProjectReLink game build.
+
+## Memory-phase completion gate remains closed
+
+Despite the improved coordinator, the production memory phase is not complete. The current branch still has no `host/ps5/memory.c` service and does not initialize/bind the extent pool during title startup. `hos_mem.c` still uses the desktop allocator/discard paths; the PS5 branch in `vk_memory.cpp` only documents that guest pages must already be committed. The Vulkan import lifetime wrappers are not called from the real import/retirement path.
+
+The remaining blocking work is therefore concrete:
+
+1. Implement and initialize a PS5 page service that allocates extents, maps required views, zeroes newly claimed pages, decommits safe ranges, and retries partial kernel failures.
+2. Replace the Windows first-touch/commit assumptions with a PS5 fault/commit strategy whose signal/exception safety is established. Do not call allocation, locks, or unverified kernel operations from a fault handler.
+3. Connect `AllocateMemoryPages` / `FreeMemoryPages` and `hos_commit` to the service, including full guest-address width and dirty-page tracking.
+4. Connect the service's GPU permission/import holds to the actual RADV import path and release holds only after the renderer's completed timeline value permits destroying each import.
+5. Add the PS5 source groups and startup/shutdown lifecycle to the real title build, then validate the 512 GiB reservation, direct-memory mapping, protection transitions, fault handling, and GPU import retirement on the target console.
+
+The diagnostic workflow and source changes do not close these gates. No build, test, or console validation is claimed.
