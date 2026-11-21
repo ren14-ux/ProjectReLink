@@ -187,7 +187,15 @@ static const MkwVkHost vk_host = {
 };
 
 static const MkwVkRenderer *vk;   /* the Vulkan back end, when it was chosen and started */
+#if !defined(RELINK_PS5_STATIC_VULKAN)
 static HMODULE vk_module;   /* (the last back end loaded: rx_close_asked) */
+#else
+/* PS5 title builds link the renderer into the executable; there is no DLL to load. */
+extern const MkwVkRenderer *mkwvk_init(const MkwVkHost *host);
+extern void mkwvk_close_asked(void);
+/* Optional ReLink-only hook: older renderer builds do not export it. */
+extern void relink_program_set(const nvn_prog *p) __attribute__((weak));
+#endif
 
 /* The game registers its first textures and samplers before the window's thread starts the renderer (NVN is up
    first): those calls are kept here and given to the renderer rx_start chose, in order. Without that the Vulkan back
@@ -253,9 +261,19 @@ static void (*program_set_fn)(const nvn_prog *p);   /* (relink) relink_vk.dll's 
 static int preparing_shaders;   /* (relink) rx_prepare_shaders: no window, no box when the renderer is missing */
 /* dll: mkw_vk.dll (our Vulkan back end) or mkw_eden.dll (Eden's renderer driven natively, gpu/eden): one export */
 static const MkwVkRenderer *load_vulkan(const char *dll) {
+#if defined(RELINK_PS5_STATIC_VULKAN)
+    (void)dll;
+    program_set_fn = relink_program_set ? relink_program_set : NULL;
+    const MkwVkRenderer *r = mkwvk_init(&vk_host);
+    if (!r || r->version != MKWVK_API_VERSION) {
+        hos_log("rx: the statically linked Vulkan back end did not start");
+        return NULL;
+    }
+    return r;
+#else
     char path[MAX_PATH];
     const DWORD n = GetModuleFileNameA(NULL, path, MAX_PATH);
-    char *slash = n ? (strrchr(path, '\\') ? strrchr(path, '\\') : strrchr(path, '/')) : NULL;   /* (linux: '/') */
+    char *slash = n ? (strrchr(path, '\\\\') ? strrchr(path, '\\\\') : strrchr(path, '/')) : NULL;   /* (linux: '/') */
     if (!slash) return NULL;
     strcpy(slash + 1, dll);
     HMODULE m = LoadLibraryA(path);
@@ -263,18 +281,15 @@ static const MkwVkRenderer *load_vulkan(const char *dll) {
         const DWORD err = GetLastError();
         hos_log("rx: RX_BACKEND=vulkan, but %s did not load (%lu): WebGPU", path, err);
 #ifdef _WIN32
-        /* (relink, issue 23) Two of a player's logs: relink_vk.dll "did not load (126)" and no SDL either, the game started
-           from a folder without them (the libraries are in bin\ since the launcher), and a window that stayed black for good
-           with nothing on screen to say why. Said in plain words, and in a box (not while shaders are prepared) */
         hos_log("rx: the renderer could not be loaded (%s): nothing will be drawn. Start the game from ReLink (the launcher), "
                 "or install the game again there", err == ERROR_MOD_NOT_FOUND ? "the file or a library it needs is missing"
                                                  : err == ERROR_BAD_EXE_FORMAT ? "the file is damaged" : "Windows refused it");
         if (!preparing_shaders && !getenv("HOS_HEADLESS") && strcmp(dll, "relink_vk.dll") == 0) {
             char text[MAX_PATH + 512];
             snprintf(text, sizeof text,
-                     "ReLink's renderer could not be loaded:\n\n%s\n(Windows error %lu)\n\nThe window would stay black. Start the "
+                     "ReLink's renderer could not be loaded:\\n\\n%s\\n(Windows error %lu)\\n\\nThe window would stay black. Start the "
                      "game from ReLink (the launcher), not from a copy of relink-game.exe elsewhere; if it still happens, use "
-                     "Update in ReLink, or install the game again from it.", path, err);
+                     "Update in ReLink, or install the game again.", path, err);
             MessageBoxA(NULL, text, "Project ReLink", MB_OK | MB_ICONERROR | MB_SETFOREGROUND);
         }
 #endif
@@ -282,14 +297,14 @@ static const MkwVkRenderer *load_vulkan(const char *dll) {
     }
     vk_module = m;
     mkwvk_init_fn init = (mkwvk_init_fn)(void *)GetProcAddress(m, "mkwvk_init");
-    /* (relink) the back end's own extra entry, when it has it: compute programs made ahead of their first dispatch */
-    program_set_fn = (void (*)(const nvn_prog *))(void *)GetProcAddress(m, "relink_program_set");
+    program_set_fn = (void (*)(const nvn_prog *p))(void *)GetProcAddress(m, "relink_program_set");
     const MkwVkRenderer *r = init ? init(&vk_host) : NULL;
     if (!r || r->version != MKWVK_API_VERSION) {
         hos_log("rx: the Vulkan back end did not start: WebGPU");
         return NULL;
     }
     return r;
+#endif
 }
 
 int rx_start(void *hwnd) {
@@ -321,9 +336,13 @@ int rx_prepare_shaders(void) {
 /* (relink) the window is being closed: a back end still preparing its shaders stops and keeps what it made first (a few
    seconds at most). One without the export (an older one) has nothing to keep */
 void rx_close_asked(void) {
+#if defined(RELINK_PS5_STATIC_VULKAN)
+    mkwvk_close_asked();
+#else
     if (!vk_module) return;
     void (*close_asked)(void) = (void (*)(void))(void *)GetProcAddress(vk_module, "mkwvk_close_asked");
     if (close_asked) close_asked();
+#endif
 }
 void rx_resize(int width, int height) { vk ? vk->resize(width, height) : wgr_resize(width, height); }
 const char *rx_describe(void) { return vk ? vk->describe() : wgr_describe(); }
