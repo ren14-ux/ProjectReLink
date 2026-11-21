@@ -134,11 +134,32 @@ static void test_unmap_requires_explicit_reservation_restore(void) {
     assert(ps5_mem_view_mapped(&state, view) == PS5_MEM_OK);
 }
 
+static void test_reserved_view_blocks_extent_release(void) {
+    Ps5MemState state;
+    Ps5MemExtent storage[1];
+    uint64_t handle = 0;
+    const uint64_t base = 0x700000;
+
+    assert(ps5_mem_state_init(&state, storage, 1) == PS5_MEM_OK);
+    assert(ps5_mem_extent_add(&state, base, 31) == PS5_MEM_OK);
+    assert(ps5_mem_view_reserved(&state, base) == PS5_MEM_OK);
+    assert(ps5_mem_extent_retire(&state, base) == PS5_MEM_OK);
+    assert(!ps5_mem_extent_release_ready(&state, base));
+    assert(ps5_mem_extent_forget(&state, base, &handle) == PS5_MEM_BUSY);
+    /* Once the reservation is explicitly released by the platform, the
+       bookkeeping can drop it and allow backing release. */
+    assert(ps5_mem_view_reservation_released(&state, base) == PS5_MEM_OK);
+    assert(ps5_mem_extent_release_ready(&state, base));
+    assert(ps5_mem_extent_forget(&state, base, &handle) == PS5_MEM_OK);
+    assert(handle == 31);
+}
+
 int main(void) {
     test_extent_lifecycle();
     test_atomic_range_validation();
     test_extent_capacity_and_boundaries();
     test_cross_extent_import_lifecycle();
     test_unmap_requires_explicit_reservation_restore();
+    test_reserved_view_blocks_extent_release();
     return 0;
 }
