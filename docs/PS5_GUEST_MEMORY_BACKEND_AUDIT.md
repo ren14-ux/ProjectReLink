@@ -337,6 +337,14 @@ The platform kernel header declares `sceKernelAllocateDirectMemory`, `sceKernelR
 7. The pinned `platform/src/shm.c` implementation also ignores the return value from `sceKernelReleaseDirectMemory()` and clears the `ps5_shm` object unconditionally. That makes `ps5_shm_destroy()` unsuitable for a fail-closed allocator: a kernel release failure becomes unobservable and the only local copy of the allocation handle is erased. The adapter may use `ps5_shm_create()` and `ps5_shm_map()`, but its release path should call the declared `sceKernelReleaseDirectMemory(shm.direct_start, shm.bytes)` directly, check the returned status, and clear/forget the object only after success. If release fails, retain the direct start, byte count, and extent metadata for retry. This is source-level reasoning from the pinned implementation, not a claim about console runtime behavior.
 7. These declarations establish the pinned SDK's source-level interface, not successful runtime behavior on the user's console. No console probe, build, or runtime test was performed for this audit.
 
+### Retryable SDK extent ownership layer
+
+`host/ps5/sdk_extent_pool.h` and `host/ps5/sdk_extent_pool.c` now provide the first isolated adapter boundary. The pool allocates exactly one 64 KiB direct-memory extent per slot through the pinned SDK's declared kernel API, stores the SDK-compatible `ps5_shm` descriptor for view mapping, and returns an opaque 64-bit token composed of a slot index and generation. Reused slots receive a new generation, so stale tokens cannot address a later allocation.
+
+The adapter deliberately does not call `ps5_shm_create()` or `ps5_shm_destroy()`: the pinned SDK's destroy routine discards its descriptor regardless of the kernel release result. Instead, allocation is performed with `sceKernelAllocateDirectMemory()`, and release calls `sceKernelReleaseDirectMemory()` directly. The slot remains occupied and the token remains valid when release fails, allowing a caller to retry without losing the direct-memory start and size. On successful release, the descriptor is cleared and the slot becomes reusable.
+
+The pool is externally serialized and is not yet connected to `Ps5MemState`, guest reservation, view mapping, or renderer retirement. The caller must enforce the existing extent-state release preconditions before calling the pool's release function. The adapter source is not yet part of a PS5 compile group, and no SDK build or console runtime test has been performed.
+
 ### Remaining adapter blockers
 
 - A proven exact-address reservation path for the complete guest window.
