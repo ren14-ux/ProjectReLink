@@ -54,6 +54,29 @@ The runtime header's own description said it modeled a flat guest memory below 4
 
 Do not implement or enable PS5 guest-memory mapping until this address-width contract is reconciled. The direct-memory plan remains viable only if the actual guest-address model and the 512 GiB HOS layout are made consistent first. No runtime behavior is inferred from this source inspection alone.
 
+## First-touch commit path: additional platform work
+
+The guest allocator is not just `hos_commit()`. The current demand-commit path spans three Windows-compatibility layers:
+
+- `host/mkw_glue.c` implements explicit commits with `VirtualAlloc(MEM_COMMIT)`, rounded to 64 KiB.
+- Its `commit_on_touch()` exception handler handles an access fault inside the reserved guest window, checks `VirtualQuery()`, and commits a 64 KiB unit on first touch. `hos_commit_init()` registers this handler.
+- On Linux, `host/posix/win32_posix.c` translates SIGSEGV/SIGBUS into the compatibility exception record. Its `VirtualAlloc()` maps ordinary anonymous memory with `mmap()`; its `VirtualQuery()` treats the already-accessible guest window as committed. The kernel's `MAP_NORESERVE` demand paging supplies the physical pages, so the Linux handler does not need to allocate them itself.
+
+PS5 cannot simply reuse the Linux behavior: its fixed guest range must first be reserved and a fault must cause a PS5 mapping to be installed. Nor can it blindly reuse the Windows behavior: PS5 has neither Windows `VirtualAlloc` nor Windows exception delivery.
+
+### Required platform contract
+
+A PS5 memory backend must provide all of the following as one coordinated implementation:
+
+1. Reserve the exact `[A64_HOST_BASE, A64_HOST_BASE + HOS_GUEST_SPACE)` range as inaccessible virtual space.
+2. Handle faults in that range and distinguish an uncommitted reservation from a mapped page without calling non-signal-safe allocators or taking a lock that the faulting thread might already hold.
+3. Map a 64 KiB direct-memory unit at the faulting guest address (or use a separately validated PS5 anonymous-memory route), while preserving the 16 KiB kernel page and RADV host-import alignment requirements.
+4. Make concurrent faults on the same unit idempotent; one thread must not replace or release a mapping another thread just installed.
+5. Keep mapping metadata for decommit and coordinate release with `rx_guest_imported()` / `rx_guest_release()` so the GPU never retains a pointer to released pages.
+6. Supply a PS5-aware memory query/state check or refactor the first-touch handler to use a platform-neutral page-state API. The Linux shim's `VirtualQuery()` implementation is not reusable as-is because it reports the entire guest window committed.
+
+This confirms why adding only a `hos_commit_ps5()` function would be incomplete. The fault path, page-state tracking, and Vulkan import lifetime must be designed together.
+
 ## Decision
 
 Do not add a speculative `hos_mem_ps5.c` yet. The SDK provides enough primitives to design a direct-memory-backed arena, but the exact 512 GiB reservation, overlapping-commit bookkeeping, zeroing/decommit rules, and GPU-visible mapping/import contract must be established first. The PS5 build guard remains correct until these are implemented together.
