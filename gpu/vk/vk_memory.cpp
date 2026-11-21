@@ -2702,7 +2702,7 @@ void bg_drain() {
     for (auto& [lo, p] : ready) {
         auto imp = imported.find(lo);
 #if defined(RELINK_PS5_RADV)
-        if (!p.memory && p.ps5_import_held) {
+        if (!p.memory && !p.buffer && p.pieces.empty() && p.ps5_import_held) {
             if (!ps5_import_release(p)) {
                 std::lock_guard lk(bg_mu);
                 bg_ready.push_back({lo, std::move(p)});
