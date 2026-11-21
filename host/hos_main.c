@@ -12,6 +12,7 @@
 #include "hos_paths.h"
 #if defined(A64_PS5)
 #include "ps5/guest_window.h"
+#include "ps5/memory.h"
 #endif
 #include "../gpu/vk/vk_api.h"
 #include "../gpu/vk/oot_cheat_items.h"
@@ -164,6 +165,11 @@ static int reserve_guest(void) {
                                  (size_t)GUEST_SPACE);
     if (result != PS5_GUEST_WINDOW_OK) {
         hos_log("mem: PS5 guest-window reservation failed (%d)", (int)result);
+        return 0;
+    }
+    if (ps5_memory_init(&ps5_guest_window) != 0) {
+        hos_log("mem: PS5 guest-memory service initialization failed");
+        (void)ps5_guest_window_release(&ps5_guest_window);
         return 0;
     }
     hos_log("mem: PS5 guest window reserved at %#llx (%llu MB)",
