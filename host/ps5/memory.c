@@ -129,6 +129,7 @@ static Ps5MemResult map_allocated_views(uint64_t guest_extent) {
             const uint64_t address = guest_extent + (uint64_t)page * PS5_MEM_PAGE_SIZE;
             if (!(pending & bit)) continue;
             memset((void *)(uintptr_t)address, 0, PS5_MEM_PAGE_SIZE);
+            HOS_WRITTEN((void *)(uintptr_t)address, PS5_MEM_PAGE_SIZE);
             r = ps5_mem_backend_mark_pages_zeroed(&service.state, address, PS5_MEM_PAGE_SIZE);
             if (r != PS5_MEM_OK) return r;
         }
@@ -175,8 +176,10 @@ static Ps5MemResult reap_extent(uint64_t guest_extent) {
         const unsigned view_index = page / PS5_MEM_PAGES_PER_VIEW;
         const uint64_t address = guest_extent + (uint64_t)page * PS5_MEM_PAGE_SIZE;
         if (!(pending_free & bit) || imports[view_index]) continue;
-        if (mapped & (1u << view_index))
+        if (mapped & (1u << view_index)) {
             memset((void *)(uintptr_t)address, 0, PS5_MEM_PAGE_SIZE);
+            HOS_WRITTEN((void *)(uintptr_t)address, PS5_MEM_PAGE_SIZE);
+        }
         r = ps5_mem_backend_free_pages(&service.state, address, PS5_MEM_PAGE_SIZE);
         if (r != PS5_MEM_OK) return r;
     }
