@@ -51,6 +51,10 @@ Ps5MemResult ps5_mem_backend_claim_pages(Ps5MemState *state,
                                          uint64_t guest_address, uint64_t bytes);
 Ps5MemResult ps5_mem_backend_free_pages(Ps5MemState *state,
                                         uint64_t guest_address, uint64_t bytes);
+Ps5MemResult ps5_mem_backend_mark_pending_free(Ps5MemState *state,
+                                               uint64_t guest_address, uint64_t bytes);
+Ps5MemResult ps5_mem_backend_pending_free(const Ps5MemState *state,
+                                          uint64_t guest_extent, uint16_t *page_mask_out);
 Ps5MemResult ps5_mem_backend_mark_pages_zeroed(Ps5MemState *state,
                                                 uint64_t guest_address, uint64_t bytes);
 Ps5MemResult ps5_mem_backend_allocated_views(const Ps5MemState *state,
