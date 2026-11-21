@@ -359,8 +359,8 @@ int ps5_memory_import_release(uint64_t guest_offset, uint64_t bytes) {
     uint64_t begin, end, extent_offset;
     Ps5MemResult r;
     pthread_mutex_lock(&memory_mutex);
-    if (!normalize_range(guest_offset, bytes, &begin, &end) ||
-        (begin & (PS5_MEM_VIEW_SIZE - 1)) || ((end - begin) & (PS5_MEM_VIEW_SIZE - 1))) {
+    if ((guest_offset & (PS5_MEM_VIEW_SIZE - 1)) || (bytes & (PS5_MEM_VIEW_SIZE - 1)) ||
+        !normalize_range(guest_offset, bytes, &begin, &end)) {
         pthread_mutex_unlock(&memory_mutex);
         return -1;
     }
