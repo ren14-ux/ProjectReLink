@@ -320,6 +320,7 @@ fail:
 
 int ps5_memory_commit_pages(uint64_t guest_offset, uint64_t bytes) {
     Ps5MemResult r;
+    if (!bytes) return 0;
     pthread_mutex_lock(&memory_mutex);
     r = commit_locked(guest_offset, bytes);
     pthread_mutex_unlock(&memory_mutex);
@@ -328,6 +329,7 @@ int ps5_memory_commit_pages(uint64_t guest_offset, uint64_t bytes) {
 
 int ps5_memory_free_pages(uint64_t guest_offset, uint64_t bytes) {
     Ps5MemResult r;
+    if (!bytes) return 0;
     pthread_mutex_lock(&memory_mutex);
     r = free_locked(guest_offset, bytes);
     pthread_mutex_unlock(&memory_mutex);
