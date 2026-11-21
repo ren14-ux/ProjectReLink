@@ -80,13 +80,16 @@ typedef GuestContext Ctx;
    release store (a plain store on x86): the compiler may not move it above the data store, so a scan that clears a
    mark has seen the data it marks. (The marks are ~1 ms of the castle's game-thread CPU a frame. Marking the last
    byte's page only when a store crosses into it saved ~0.3 ms but made the code 20 MB bigger: not kept.) */
-extern uint8_t a64_dirty[1u << 20];
+/* One dirty byte per 4 KiB page in the native 512 GiB guest window. */
+#define A64_DIRTY_PAGES (1ull << 27)
+extern uint8_t a64_dirty[A64_DIRTY_PAGES];
 /* (Tried 2026-10-21: reading a mark first and writing it only when clear, against cache lines moving between cores:
    game threads +1.1 ms a frame, the code 18 MB bigger. Not kept.) */
-#define A64_MARK(a, n) (__atomic_store_n(&a64_dirty[(uint32_t)(a) >> 12], 1, __ATOMIC_RELEASE), \
-                        __atomic_store_n(&a64_dirty[(uint32_t)((a) + (n) - 1) >> 12], 1, __ATOMIC_RELEASE))
+#define A64_MARK(a, n) (__atomic_store_n(&a64_dirty[(uint64_t)(a) >> 12], 1, __ATOMIC_RELEASE), \
+                        __atomic_store_n(&a64_dirty[((uint64_t)(a) + (uint64_t)(n) - 1) >> 12], 1, __ATOMIC_RELEASE))
 #elif defined(A64_WRITE_TRACK)
-extern uint8_t a64_dirty[1u << 20];
+#define A64_DIRTY_PAGES (1u << 20)
+extern uint8_t a64_dirty[A64_DIRTY_PAGES];
 #define A64_MARK(a, n) (a64_dirty[(uint32_t)(a) >> 12] = 1, a64_dirty[(uint32_t)((a) + (n) - 1) >> 12] = 1)
 #else
 #define A64_MARK(a, n) ((void)0)
