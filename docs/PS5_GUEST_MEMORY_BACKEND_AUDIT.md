@@ -147,7 +147,7 @@ The pinned SDK source was inspected directly at `platform/include/ps5platform/ke
 
 A PS5 page table cannot be represented as a simple 4 KiB bitmap. The implementation needs separate accounting for 16 KiB virtual mapping pages and 64 KiB physical direct-memory units. A 64 KiB physical unit may back four adjacent 16 KiB virtual pages, and it must not be released while any subpage remains mapped or any RADV import holds the corresponding guest range. Partial commits and frees therefore require a reference-counted or interval-based allocator, not one direct-memory allocation per arbitrary guest commit call.
 
-The existing `ps5_shm` wrapper is useful as a source of fixed-map mechanics, but its global direct-memory allocation model and CPU-only protections should not be wired into `hos_commit()` unchanged. The next safe implementation step is to settle a bounded arena layout and ownership table, then validate whether the required kernel map/protect calls are callable from the first-touch handler. Until then, no speculative PS5 allocator is added and the PS5 build guard remains in place.
+The existing `ps5_shm` wrapper is useful as a source of fixed-map mechanics, but its global direct-memory allocation model and CPU-only protections should not be wired into `hos_commit()` unchanged. The explicit page service and ownership table have since been added. The remaining first-touch step is still gated on a target-console probe proving recoverable signal context and safe kernel mapping behavior; the PS5 build guard remains in place until that and the title build are resolved.
 
 No compilation, first-touch mapping probe, or console test was performed for this follow-up.
 
@@ -244,11 +244,7 @@ At the time of the initial audit, the native dirty bitmap was only 1 MiB and use
 
 This closes the bitmap-size/index mismatch in source, but does not prove incremental uploads on PS5. The PS5 renderer still needs a real build and console validation of every writer path and GPU coherency behavior.
 
-A future implementation should choose and document one explicit mechanism before enabling the renderer:
-1. a correctly sized 512-GiB page bitmap (128 MiB) with 64-bit guest page indexing and all lifted/runtime/host writers marking it; or
-2. a PS5-supported page-protection/write-fault mechanism whose fault and retry semantics are demonstrated, with a safe fallback for concurrent CPU and GPU access.
-
-The first option has a material fixed-memory cost and requires checking every store/CAS/helper path. The second depends on platform behavior not established by the pinned SDK header declarations. Until one is implemented, the PS5 renderer cannot claim reliable incremental guest-memory uploads. This is separate from direct-memory allocation and Vulkan import lifetime.
+ReLink now selects the first source-level mechanism: a 128 MiB native dirty-page bitmap with 64-bit guest page indices. The remaining renderer gate is to compile and validate all lifted/runtime/host writers and confirm incremental uploads and GPU coherency on PS5. The signal/write-fault alternative remains unproven and is not used.
 
 ## Vulkan import lifetime: what the current renderer guarantees, and what PS5 must preserve
 
@@ -271,7 +267,7 @@ PS5 backend requirements derived from this lifecycle:
 5. Treat zeroing and decommit as distinct operations. If an import still references the extent, preserve the backing and zero only when the renderer's synchronization rules make that safe; never punch/unmap the backing out from under the GPU.
 6. Keep the PS5 state manager's transitions transactional: if any kernel map/unmap/protection call fails, retain enough state to retry or roll back without claiming the extent was released.
 
-This establishes the next safe implementation boundary: a standalone metadata/lifetime layer can track extent and view state, but the production adapter must receive explicit GPU-retirement notifications from the renderer before it can call `sceKernelReleaseDirectMemory`. No direct-memory release callback is wired to the existing renderer today.
+The explicit memory service now receives import acquire/release notifications from the renderer and releases backing only after the corresponding Vulkan allocation is destroyed after `mem_completed`. This integration is source-level and still requires the PS5 title build and console validation.
 
 ## Standalone extent-state bookkeeping added
 
@@ -293,9 +289,9 @@ This is intentionally a bookkeeping primitive, not a memory allocator or kernel 
 - The renderer must retain import holds until the GPU timeline confirms completion, then release those holds.
 - The caller remains responsible for serializing concurrent access to the state object.
 - The state module performs no direct-memory allocation or kernel mapping itself; those operations are now performed by the SDK extent pool and memory service.
-- The fixed metadata capacity must be chosen by the future backend and exhaustion must fail closed.
+- The PS5 service grows its caller-owned extent, slot, and hash-index arrays up to a bounded 262,144-extent limit; exhaustion fails closed.
 
-The source is not yet included in a PS5 build source group and no production caller uses it. This creates a testable boundary for the next integration step without implying that PS5 guest memory is operational.
+The state module is now called by `host/ps5/memory.c`, which is initialized from `hos_main.c` and called by `hos_mem.c` and `vk_memory.cpp`. These files are not yet included in a complete PS5 game build source group, so the production integration remains uncompiled.
 
 ### Host-side state-transition tests
 
