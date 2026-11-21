@@ -102,8 +102,11 @@ Ps5MemResult ps5_mem_backend_map_view(Ps5MemState *state, Ps5SdkExtentPool *pool
     sr = ps5_mem_view_mapped(state, (uint64_t)(uintptr_t)address);
     if (sr != PS5_MEM_OK) {
         /* Mapping succeeded but state rejected it: unmap, then clear stale reservation state. */
-        (void)ps5_sdk_extent_unmap_view(pool, token, view_index);
-        (void)ps5_mem_view_reservation_released(state, (uint64_t)(uintptr_t)address);
+        if (ps5_sdk_extent_unmap_view(pool, token, view_index) == PS5_SDK_EXTENT_OK) {
+            (void)ps5_mem_view_reservation_released(state, (uint64_t)(uintptr_t)address);
+        }
+        /* If rollback fails, keep the state reservation bit set as a fail-closed
+           blocker; the pool's mapped bit also prevents backing release. */
         *view_out = NULL;
         return sr;
     }
