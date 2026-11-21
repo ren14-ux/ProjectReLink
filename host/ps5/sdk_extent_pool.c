@@ -70,7 +70,6 @@ Ps5SdkExtentResult ps5_sdk_extent_reserve_view(Ps5SdkExtentPool *pool, uint64_t 
     uint32_t generation;
     Ps5SdkExtentSlot *slot;
     void *reserved;
-    int32_t result;
     uint8_t bit;
 
     if (!address || view_index >= PS5_SDK_EXTENT_VIEW_COUNT ||
@@ -89,7 +88,6 @@ Ps5SdkExtentResult ps5_sdk_extent_reserve_view(Ps5SdkExtentPool *pool, uint64_t 
      * Record the caller's ownership of the existing reservation only.
      */
     reserved = address;
-    (void)result;
     slot->reservations[view_index] = reserved;
     slot->reserved_mask |= bit;
     return PS5_SDK_EXTENT_OK;
@@ -150,7 +148,7 @@ Ps5SdkExtentResult ps5_sdk_extent_map_view(Ps5SdkExtentPool *pool, uint64_t toke
         return PS5_SDK_EXTENT_KERNEL;
     }
     slot->views[view_index] = mapped;
-    slot->reservations[view_index] = NULL;
+    /* Keep the address so unmap can restore the parent-window reservation. */
     slot->reserved_mask &= (uint8_t)~(1u << view_index);
     slot->mapped_mask |= (uint8_t)(1u << view_index);
     *view_out = mapped;
