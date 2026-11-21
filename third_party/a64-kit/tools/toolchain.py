@@ -26,7 +26,8 @@ def ps5_sdk_root():
     if actual != expected:
         raise SystemExit("PS5 SDK revision mismatch: expected %s, found %s in %s" % (expected, actual or "(empty)", root))
     required = ("bin/prospero-clang", "bin/prospero-clang++", "bin/prospero-lld",
-                "target/include", "target/lib/libps5platform.a")
+                "target/include", "target/lib/libps5platform.a", "target/lib/libc++.a",
+                "target/lib/libc++abi.a", "target/lib/libunwind.a")
     missing = [p for p in required if not os.path.exists(os.path.join(root, p))]
     if missing:
         raise SystemExit("pinned PS5 SDK is incomplete at %s: missing %s" % (root, ", ".join(missing)))
@@ -44,7 +45,10 @@ def ps5_compiler(cxx=False):
 
 def ps5_linker():
     """Return the pinned SDK's PS5 linker wrapper."""
-    return os.path.join(ps5_sdk_root(), "bin", "prospero-lld")
+    path = os.path.join(ps5_sdk_root(), "bin", "prospero-lld")
+    if not os.path.isfile(path):
+        raise SystemExit("PS5 linker wrapper not found: %s" % path)
+    return path
 
 
 def ps5():
