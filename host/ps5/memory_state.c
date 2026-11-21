@@ -50,7 +50,8 @@ Ps5MemResult ps5_mem_state_init(Ps5MemState *state, Ps5MemExtent *storage, size_
 Ps5MemResult ps5_mem_extent_add(Ps5MemState *state, uint64_t guest_base, uint64_t backing_handle) {
     size_t i;
     if (!state || !state->extents || !state->capacity ||
-        (guest_base & (PS5_MEM_EXTENT_SIZE - 1)) || backing_handle == PS5_MEM_NO_HANDLE)
+        (guest_base & (PS5_MEM_EXTENT_SIZE - 1)) ||
+        guest_base > UINT64_MAX - PS5_MEM_EXTENT_SIZE || backing_handle == PS5_MEM_NO_HANDLE)
         return PS5_MEM_INVALID;
     if (find_extent(state, guest_base)) return PS5_MEM_STATE;
     for (i = 0; i < state->capacity; ++i) {
@@ -181,6 +182,17 @@ int ps5_mem_extent_release_ready(const Ps5MemState *state, uint64_t guest_base) 
     for (i = 0; i < PS5_MEM_VIEWS_PER_EXTENT; ++i)
         if (e->import_refs[i]) return 0;
     return 1;
+}
+
+Ps5MemResult ps5_mem_extent_get_handle(const Ps5MemState *state, uint64_t guest_base,
+                                       uint64_t *backing_handle_out) {
+    const Ps5MemExtent *e;
+    if (!backing_handle_out || (guest_base & (PS5_MEM_EXTENT_SIZE - 1)))
+        return PS5_MEM_INVALID;
+    e = find_extent_const(state, guest_base);
+    if (!e) return PS5_MEM_NOT_FOUND;
+    *backing_handle_out = e->backing_handle;
+    return PS5_MEM_OK;
 }
 
 Ps5MemResult ps5_mem_extent_forget(Ps5MemState *state, uint64_t guest_base, uint64_t *backing_handle_out) {
