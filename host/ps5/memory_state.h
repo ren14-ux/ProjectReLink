@@ -28,6 +28,8 @@ typedef struct Ps5MemExtent {
     uint8_t mapped_mask;       /* CPU virtual views currently mapped */
     uint8_t gpu_mask;          /* views currently granted GPU access */
     uint8_t pending_release;   /* reject new imports; release when quiescent */
+    uint16_t allocated_pages;  /* sixteen 4 KiB logical guest pages in this extent */
+    uint16_t zero_pending;     /* newly allocated/recycled pages requiring zero-fill */
     uint8_t occupied;
 } Ps5MemExtent;
 
@@ -66,6 +68,23 @@ Ps5MemResult ps5_mem_view_mapped(Ps5MemState *state, uint64_t guest_view);
 Ps5MemResult ps5_mem_view_unmapped(Ps5MemState *state, uint64_t guest_view);
 Ps5MemResult ps5_mem_view_gpu_granted(Ps5MemState *state, uint64_t guest_view);
 Ps5MemResult ps5_mem_view_gpu_revoked(Ps5MemState *state, uint64_t guest_view);
+
+/*
+ * Logical game allocations are tracked at 4 KiB granularity, independently of
+ * the 16 KiB virtual mapping views and 64 KiB physical backing extents.
+ * All ranges are 4 KiB aligned. Claim/free validate the whole range before
+ * changing any bit. A newly claimed page is returned as zero-pending until
+ * the caller has explicitly zero-filled it and calls mark_zeroed.
+ */
+Ps5MemResult ps5_mem_pages_claim(Ps5MemState *state, uint64_t guest_address, uint64_t bytes);
+Ps5MemResult ps5_mem_pages_free(Ps5MemState *state, uint64_t guest_address, uint64_t bytes);
+Ps5MemResult ps5_mem_pages_mark_zeroed(Ps5MemState *state, uint64_t guest_address, uint64_t bytes);
+/* Return the four-bit 16 KiB view mask containing at least one allocated page. */
+Ps5MemResult ps5_mem_pages_allocated_views(const Ps5MemState *state, uint64_t guest_extent,
+                                           uint8_t *view_mask_out);
+/* Return the sixteen-bit mask of pages that still require zero-fill. */
+Ps5MemResult ps5_mem_pages_zero_pending(const Ps5MemState *state, uint64_t guest_extent,
+                                        uint16_t *page_mask_out);
 
 /* Import ranges are 16 KiB aligned and must be fully mapped and GPU-granted. */
 Ps5MemResult ps5_mem_import_acquire(Ps5MemState *state, uint64_t guest_address, uint64_t bytes);
