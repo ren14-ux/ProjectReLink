@@ -82,6 +82,20 @@ Ps5MemResult ps5_mem_view_reserved(Ps5MemState *state, uint64_t guest_view) {
     return PS5_MEM_OK;
 }
 
+Ps5MemResult ps5_mem_view_reservation_released(Ps5MemState *state, uint64_t guest_view) {
+    uint64_t base;
+    unsigned view;
+    Ps5MemExtent *e;
+    Ps5MemResult r = view_location(guest_view, &base, &view);
+    if (r != PS5_MEM_OK) return r;
+    e = find_extent(state, base);
+    if (!e) return PS5_MEM_NOT_FOUND;
+    if (!(e->reserved_mask & (1u << view)) || (e->mapped_mask & (1u << view)))
+        return PS5_MEM_STATE;
+    e->reserved_mask &= (uint8_t)~(1u << view);
+    return PS5_MEM_OK;
+}
+
 Ps5MemResult ps5_mem_view_mapped(Ps5MemState *state, uint64_t guest_view) {
     uint64_t base;
     unsigned view;
@@ -195,7 +209,7 @@ Ps5MemResult ps5_mem_extent_retire(Ps5MemState *state, uint64_t guest_base) {
 int ps5_mem_extent_release_ready(const Ps5MemState *state, uint64_t guest_base) {
     const Ps5MemExtent *e = find_extent_const(state, guest_base);
     unsigned i;
-    if (!e || !e->pending_release || e->mapped_mask || e->gpu_mask) return 0;
+    if (!e || !e->pending_release || e->reserved_mask || e->mapped_mask || e->gpu_mask) return 0;
     for (i = 0; i < PS5_MEM_VIEWS_PER_EXTENT; ++i)
         if (e->import_refs[i]) return 0;
     return 1;
