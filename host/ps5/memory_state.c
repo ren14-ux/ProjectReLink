@@ -198,6 +198,35 @@ Ps5MemResult ps5_mem_pages_claim(Ps5MemState *state, uint64_t guest_address, uin
     return PS5_MEM_OK;
 }
 
+Ps5MemResult ps5_mem_pages_claim_missing(Ps5MemState *state, uint64_t guest_address, uint64_t bytes) {
+    uint64_t end, at;
+    Ps5MemResult r = page_range_validate(guest_address, bytes, &end);
+    if (r != PS5_MEM_OK) return r;
+    if (!state || !state->extents) return PS5_MEM_INVALID;
+
+    /* Validate every unowned page before mutating any extent. */
+    for (at = guest_address; at < end; at += PS5_MEM_PAGE_SIZE) {
+        uint64_t base = at & ~(PS5_MEM_EXTENT_SIZE - 1);
+        unsigned page = (unsigned)((at - base) / PS5_MEM_PAGE_SIZE);
+        Ps5MemExtent *e = find_extent(state, base);
+        if (!e) return PS5_MEM_NOT_FOUND;
+        if (e->pending_release) return PS5_MEM_STATE;
+        if (!(e->allocated_pages & (UINT16_C(1) << page)) &&
+            e->import_refs[page / PS5_MEM_PAGES_PER_VIEW]) return PS5_MEM_BUSY;
+    }
+    for (at = guest_address; at < end; at += PS5_MEM_PAGE_SIZE) {
+        uint64_t base = at & ~(PS5_MEM_EXTENT_SIZE - 1);
+        unsigned page = (unsigned)((at - base) / PS5_MEM_PAGE_SIZE);
+        Ps5MemExtent *e = find_extent(state, base);
+        const uint16_t bit = (uint16_t)(UINT16_C(1) << page);
+        if (!(e->allocated_pages & bit)) {
+            e->allocated_pages |= bit;
+            e->zero_pending |= bit;
+        }
+    }
+    return PS5_MEM_OK;
+}
+
 Ps5MemResult ps5_mem_pages_free(Ps5MemState *state, uint64_t guest_address, uint64_t bytes) {
     uint64_t end, at;
     Ps5MemResult r = page_range_validate(guest_address, bytes, &end);
@@ -275,6 +304,17 @@ Ps5MemResult ps5_mem_pages_zero_pending(const Ps5MemState *state, uint64_t guest
     return PS5_MEM_OK;
 }
 
+Ps5MemResult ps5_mem_pages_allocated_mask(const Ps5MemState *state, uint64_t guest_extent,
+                                          uint16_t *page_mask_out) {
+    const Ps5MemExtent *e;
+    if (!page_mask_out || (guest_extent & (PS5_MEM_EXTENT_SIZE - 1)))
+        return PS5_MEM_INVALID;
+    e = find_extent_const(state, guest_extent);
+    if (!e) return PS5_MEM_NOT_FOUND;
+    *page_mask_out = e->allocated_pages;
+    return PS5_MEM_OK;
+}
+
 Ps5MemResult ps5_mem_import_acquire(Ps5MemState *state, uint64_t guest_address, uint64_t bytes) {
     uint64_t end, at;
     Ps5MemResult r = range_validate(guest_address, bytes, &end);
@@ -328,6 +368,22 @@ Ps5MemResult ps5_mem_extent_retire(Ps5MemState *state, uint64_t guest_base) {
     e = find_extent(state, guest_base);
     if (!e) return PS5_MEM_NOT_FOUND;
     e->pending_release = 1;
+    return PS5_MEM_OK;
+}
+
+Ps5MemResult ps5_mem_extent_view_state(const Ps5MemState *state, uint64_t guest_base,
+                                       uint8_t *reserved_mask, uint8_t *mapped_mask,
+                                       uint8_t *gpu_mask, uint32_t import_refs[PS5_MEM_VIEWS_PER_EXTENT]) {
+    const Ps5MemExtent *e;
+    if ((guest_base & (PS5_MEM_EXTENT_SIZE - 1)) ||
+        (!reserved_mask && !mapped_mask && !gpu_mask && !import_refs))
+        return PS5_MEM_INVALID;
+    e = find_extent_const(state, guest_base);
+    if (!e) return PS5_MEM_NOT_FOUND;
+    if (reserved_mask) *reserved_mask = e->reserved_mask;
+    if (mapped_mask) *mapped_mask = e->mapped_mask;
+    if (gpu_mask) *gpu_mask = e->gpu_mask;
+    if (import_refs) memcpy(import_refs, e->import_refs, sizeof(e->import_refs));
     return PS5_MEM_OK;
 }
 
