@@ -32,7 +32,12 @@ reserve_exact(uintptr_t hint, size_t bytes, void **reserved)
    if ((uintptr_t)at != hint) {
       printf("guest-window: moved hint=0x%" PRIxPTR " actual=%p bytes=0x%zx; releasing\n",
              hint, at, bytes);
-      sceKernelMunmap(at, bytes);
+      const int release = sceKernelMunmap(at, bytes);
+      if (release != 0) {
+         printf("guest-window: relocated-range release FAILED result=0x%08x; aborting probe\\n",
+                (unsigned)release);
+         return -2; /* Do not continue with a possibly occupied range. */
+      }
       return -1;
    }
    *reserved = at;
@@ -91,6 +96,7 @@ probe_segments(unsigned count)
 /*
  * Returns 0 if either a single contiguous reservation or a set of adjacent
  * 16 GiB reservations succeeded for the 512 GiB or 448 GiB guest window.
+ * Returns -1 if all layouts fail, or -2 if cleanup fails (stop immediately).
  * A successful result always releases the test reservation before returning.
  */
 int
@@ -99,16 +105,28 @@ ps5_probe_guest_window(void)
    printf("guest-window: begin base=0x%" PRIx64 " segment=0x%" PRIx64 "\n",
           BASE, SEGMENT_BYTES);
 
-   if (probe_one_range((size_t)(SEGMENT_COUNT_512 * SEGMENT_BYTES)) == 0)
+   int result = probe_one_range((size_t)(SEGMENT_COUNT_512 * SEGMENT_BYTES));
+   if (result == 0)
       return 0;
-   if (probe_segments(SEGMENT_COUNT_512) == 0)
+   if (result == -2)
+      return -2;
+   result = probe_segments(SEGMENT_COUNT_512);
+   if (result == 0)
       return 0;
+   if (result == -2)
+      return -2;
 
    printf("guest-window: retrying reduced 448 GiB window\n");
-   if (probe_one_range((size_t)(SEGMENT_COUNT_448 * SEGMENT_BYTES)) == 0)
+   result = probe_one_range((size_t)(SEGMENT_COUNT_448 * SEGMENT_BYTES));
+   if (result == 0)
       return 0;
-   if (probe_segments(SEGMENT_COUNT_448) == 0)
+   if (result == -2)
+      return -2;
+   result = probe_segments(SEGMENT_COUNT_448);
+   if (result == 0)
       return 0;
+   if (result == -2)
+      return -2;
 
    printf("guest-window: no tested contiguous guest window could be reserved\n");
    return -1;
