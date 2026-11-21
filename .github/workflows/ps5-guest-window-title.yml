@@ -6,8 +6,13 @@ on:
       - ps5/option-a-vulkan-compat
     paths:
       - "tools/ps5/**"
-      - "host/ps5/guest_window.c"
-      - "host/ps5/guest_window.h"
+      - "host/ps5/**"
+      - "host/hos_main.c"
+      - "host/hos_mem.c"
+      - "host/mkw_glue.c"
+      - "gpu/vk/vk_memory.cpp"
+      - "nx2/ps5_build.py"
+      - "third_party/a64-kit/rt/a64.h"
       - "deps/ps5-payload-sdk.commit"
       - "deps/ps5-vulkan-toolchain.commit"
       - ".github/workflows/ps5-guest-window-title.yml"
