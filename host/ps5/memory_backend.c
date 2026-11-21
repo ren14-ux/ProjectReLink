@@ -182,6 +182,24 @@ Ps5MemResult ps5_mem_backend_revoke_gpu_view(Ps5MemState *state, Ps5SdkExtentPoo
     return PS5_MEM_OK;
 }
 
+Ps5MemResult ps5_mem_backend_import_acquire(Ps5MemState *state,
+                                            uint64_t guest_address, uint64_t bytes) {
+    if (!state) return PS5_MEM_INVALID;
+    return ps5_mem_import_acquire(state, guest_address, bytes);
+}
+
+Ps5MemResult ps5_mem_backend_import_release(Ps5MemState *state,
+                                            uint64_t guest_address, uint64_t bytes) {
+    if (!state) return PS5_MEM_INVALID;
+    return ps5_mem_import_release(state, guest_address, bytes);
+}
+
+Ps5MemResult ps5_mem_backend_retire_extent(Ps5MemState *state, uint64_t guest_base) {
+    if (!state || (guest_base & (PS5_MEM_EXTENT_SIZE - 1)))
+        return PS5_MEM_INVALID;
+    return ps5_mem_extent_retire(state, guest_base);
+}
+
 Ps5MemResult ps5_mem_backend_release_extent(Ps5MemState *state,
                                             Ps5SdkExtentPool *pool,
                                             uint64_t guest_base) {
