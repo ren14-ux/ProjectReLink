@@ -62,6 +62,64 @@ Ps5SdkExtentResult ps5_sdk_extent_allocate(Ps5SdkExtentPool *pool, uint64_t *tok
     return PS5_SDK_EXTENT_FULL;
 }
 
+Ps5SdkExtentResult ps5_sdk_extent_reserve_view(Ps5SdkExtentPool *pool, uint64_t token,
+                                               unsigned view_index, void *address) {
+    size_t index;
+    uint32_t generation;
+    Ps5SdkExtentSlot *slot;
+    void *reserved;
+    int32_t result;
+    uint8_t bit;
+
+    if (!address || view_index >= PS5_SDK_EXTENT_VIEW_COUNT ||
+        (uintptr_t)address % PS5_SDK_EXTENT_VIEW_BYTES != 0)
+        return PS5_SDK_EXTENT_INVALID;
+    if (!decode_token(pool, token, &index, &generation)) return PS5_SDK_EXTENT_STALE;
+    slot = &pool->slots[index];
+    (void)generation;
+    bit = (uint8_t)(1u << view_index);
+    if ((slot->reserved_mask | slot->mapped_mask) & bit)
+        return PS5_SDK_EXTENT_INVALID;
+
+    reserved = address;
+    result = sceKernelReserveVirtualRange(&reserved, PS5_SDK_EXTENT_VIEW_BYTES,
+                                          PS5_KERNEL_MAP_FIXED,
+                                          PS5_SDK_EXTENT_VIEW_BYTES);
+    if (result != 0) return PS5_SDK_EXTENT_KERNEL;
+    if (reserved != address) {
+        (void)sceKernelMunmap(reserved, PS5_SDK_EXTENT_VIEW_BYTES);
+        return PS5_SDK_EXTENT_KERNEL;
+    }
+    slot->reservations[view_index] = address;
+    slot->reserved_mask |= bit;
+    return PS5_SDK_EXTENT_OK;
+}
+
+Ps5SdkExtentResult ps5_sdk_extent_release_view_reservation(Ps5SdkExtentPool *pool,
+                                                            uint64_t token,
+                                                            unsigned view_index) {
+    size_t index;
+    uint32_t generation;
+    Ps5SdkExtentSlot *slot;
+    uint8_t bit;
+    int32_t result;
+
+    if (view_index >= PS5_SDK_EXTENT_VIEW_COUNT) return PS5_SDK_EXTENT_INVALID;
+    if (!decode_token(pool, token, &index, &generation)) return PS5_SDK_EXTENT_STALE;
+    slot = &pool->slots[index];
+    (void)generation;
+    bit = (uint8_t)(1u << view_index);
+    if (!(slot->reserved_mask & bit) || (slot->mapped_mask & bit) ||
+        !slot->reservations[view_index])
+        return PS5_SDK_EXTENT_INVALID;
+
+    result = sceKernelMunmap(slot->reservations[view_index], PS5_SDK_EXTENT_VIEW_BYTES);
+    if (result != 0) return PS5_SDK_EXTENT_KERNEL;
+    slot->reservations[view_index] = NULL;
+    slot->reserved_mask &= (uint8_t)~bit;
+    return PS5_SDK_EXTENT_OK;
+}
+
 Ps5SdkExtentResult ps5_sdk_extent_map_view(Ps5SdkExtentPool *pool, uint64_t token,
                                            unsigned view_index, void *address,
                                            int protection, void **view_out) {
@@ -77,7 +135,9 @@ Ps5SdkExtentResult ps5_sdk_extent_map_view(Ps5SdkExtentPool *pool, uint64_t toke
     if (!decode_token(pool, token, &index, &generation)) return PS5_SDK_EXTENT_STALE;
     slot = &pool->slots[index];
     (void)generation;
-    if (slot->mapped_mask & (uint8_t)(1u << view_index))
+    if ((slot->mapped_mask & (uint8_t)(1u << view_index)) ||
+        !(slot->reserved_mask & (uint8_t)(1u << view_index)) ||
+        slot->reservations[view_index] != address)
         return PS5_SDK_EXTENT_INVALID;
 
     result = ps5_shm_map(&slot->shm,
@@ -91,6 +151,8 @@ Ps5SdkExtentResult ps5_sdk_extent_map_view(Ps5SdkExtentPool *pool, uint64_t toke
         return PS5_SDK_EXTENT_KERNEL;
     }
     slot->views[view_index] = mapped;
+    slot->reservations[view_index] = NULL;
+    slot->reserved_mask &= (uint8_t)~(1u << view_index);
     slot->mapped_mask |= (uint8_t)(1u << view_index);
     *view_out = mapped;
     return PS5_SDK_EXTENT_OK;
@@ -127,7 +189,7 @@ Ps5SdkExtentResult ps5_sdk_extent_release(Ps5SdkExtentPool *pool, uint64_t token
     slot = &pool->slots[index];
     (void)generation;
 
-    if (slot->mapped_mask) return PS5_SDK_EXTENT_INVALID;
+    if (slot->mapped_mask || slot->reserved_mask) return PS5_SDK_EXTENT_INVALID;
 
     /* Do not use ps5_shm_destroy(): the pinned SDK implementation discards
        the object even when sceKernelReleaseDirectMemory reports failure. */
