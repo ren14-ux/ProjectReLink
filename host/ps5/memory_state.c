@@ -2,22 +2,31 @@
 
 #include <string.h>
 
+/* Extents are kept sorted by guest_base, so page lookups stay logarithmic. */
 static Ps5MemExtent *find_extent(Ps5MemState *state, uint64_t base) {
-    size_t i;
+    size_t lo = 0, hi;
     if (!state || !state->extents) return NULL;
-    for (i = 0; i < state->capacity; ++i) {
-        Ps5MemExtent *e = &state->extents[i];
-        if (e->occupied && e->guest_base == base) return e;
+    hi = state->count;
+    while (lo < hi) {
+        const size_t mid = lo + (hi - lo) / 2;
+        Ps5MemExtent *e = &state->extents[mid];
+        if (e->guest_base > base) hi = mid;
+        else if (e->guest_base < base) lo = mid + 1;
+        else return e;
     }
     return NULL;
 }
 
 static const Ps5MemExtent *find_extent_const(const Ps5MemState *state, uint64_t base) {
-    size_t i;
+    size_t lo = 0, hi;
     if (!state || !state->extents) return NULL;
-    for (i = 0; i < state->capacity; ++i) {
-        const Ps5MemExtent *e = &state->extents[i];
-        if (e->occupied && e->guest_base == base) return e;
+    hi = state->count;
+    while (lo < hi) {
+        const size_t mid = lo + (hi - lo) / 2;
+        const Ps5MemExtent *e = &state->extents[mid];
+        if (e->guest_base > base) hi = mid;
+        else if (e->guest_base < base) lo = mid + 1;
+        else return e;
     }
     return NULL;
 }
@@ -48,29 +57,32 @@ Ps5MemResult ps5_mem_state_init(Ps5MemState *state, Ps5MemExtent *storage, size_
 }
 
 Ps5MemResult ps5_mem_extent_add(Ps5MemState *state, uint64_t guest_base, uint64_t backing_handle) {
-    size_t i;
+    size_t lo = 0, hi, i;
     if (!state || !state->extents || !state->capacity ||
         (guest_base & (PS5_MEM_EXTENT_SIZE - 1)) ||
         guest_base > UINT64_MAX - PS5_MEM_EXTENT_SIZE || backing_handle == PS5_MEM_NO_HANDLE)
         return PS5_MEM_INVALID;
-    if (find_extent(state, guest_base)) return PS5_MEM_STATE;
-    for (i = 0; i < state->capacity; ++i) {
-        Ps5MemExtent *e = &state->extents[i];
+    hi = state->count;
+    while (lo < hi) {
+        const size_t mid = lo + (hi - lo) / 2;
+        if (state->extents[mid].guest_base < guest_base) lo = mid + 1;
+        else hi = mid;
+    }
+    if (lo < state->count && state->extents[lo].guest_base == guest_base)
+        return PS5_MEM_STATE;
+    if (state->count == state->capacity) return PS5_MEM_FULL;
+    for (i = 0; i < state->count; ++i) {
         /* One SDK backing allocation must have exactly one guest owner. */
-        if (e->occupied && e->backing_handle == backing_handle) return PS5_MEM_STATE;
+        if (state->extents[i].backing_handle == backing_handle) return PS5_MEM_STATE;
     }
-    for (i = 0; i < state->capacity; ++i) {
-        Ps5MemExtent *e = &state->extents[i];
-        if (!e->occupied) {
-            memset(e, 0, sizeof(*e));
-            e->guest_base = guest_base;
-            e->backing_handle = backing_handle;
-            e->occupied = 1;
-            ++state->count;
-            return PS5_MEM_OK;
-        }
-    }
-    return PS5_MEM_FULL;
+    memmove(&state->extents[lo + 1], &state->extents[lo],
+            (state->count - lo) * sizeof(*state->extents));
+    memset(&state->extents[lo], 0, sizeof(*state->extents));
+    state->extents[lo].guest_base = guest_base;
+    state->extents[lo].backing_handle = backing_handle;
+    state->extents[lo].occupied = 1;
+    ++state->count;
+    return PS5_MEM_OK;
 }
 
 Ps5MemResult ps5_mem_view_reserved(Ps5MemState *state, uint64_t guest_view) {
@@ -444,13 +456,17 @@ Ps5MemResult ps5_mem_extent_get_handle(const Ps5MemState *state, uint64_t guest_
 
 Ps5MemResult ps5_mem_extent_forget(Ps5MemState *state, uint64_t guest_base, uint64_t *backing_handle_out) {
     Ps5MemExtent *e;
+    size_t index;
     if (!state || !backing_handle_out || (guest_base & (PS5_MEM_EXTENT_SIZE - 1)))
         return PS5_MEM_INVALID;
     e = find_extent(state, guest_base);
     if (!e) return PS5_MEM_NOT_FOUND;
     if (!ps5_mem_extent_release_ready(state, guest_base)) return PS5_MEM_BUSY;
     *backing_handle_out = e->backing_handle;
-    memset(e, 0, sizeof(*e));
+    index = (size_t)(e - state->extents);
+    memmove(&state->extents[index], &state->extents[index + 1],
+            (state->count - index - 1) * sizeof(*state->extents));
     --state->count;
+    memset(&state->extents[state->count], 0, sizeof(*state->extents));
     return PS5_MEM_OK;
 }
