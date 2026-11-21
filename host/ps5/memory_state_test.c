@@ -14,6 +14,7 @@ static void test_extent_lifecycle(void) {
 
     /* A view cannot be granted to the GPU before it is mapped. */
     assert(ps5_mem_view_gpu_granted(&state, 0x100000) == PS5_MEM_STATE);
+    assert(ps5_mem_view_reserved(&state, 0x100000) == PS5_MEM_OK);
     assert(ps5_mem_view_mapped(&state, 0x100000) == PS5_MEM_OK);
     assert(ps5_mem_view_mapped(&state, 0x100000) == PS5_MEM_STATE);
     assert(ps5_mem_view_gpu_granted(&state, 0x100000) == PS5_MEM_OK);
@@ -40,6 +41,7 @@ static void test_atomic_range_validation(void) {
 
     assert(ps5_mem_state_init(&state, storage, 1) == PS5_MEM_OK);
     assert(ps5_mem_extent_add(&state, 0x200000, 9) == PS5_MEM_OK);
+    assert(ps5_mem_view_reserved(&state, 0x200000) == PS5_MEM_OK);
     assert(ps5_mem_view_mapped(&state, 0x200000) == PS5_MEM_OK);
     assert(ps5_mem_view_gpu_granted(&state, 0x200000) == PS5_MEM_OK);
 
@@ -84,8 +86,10 @@ static void test_cross_extent_import_lifecycle(void) {
     assert(ps5_mem_extent_add(&state, second, 12) == PS5_MEM_OK);
 
     /* Map and grant the last view of extent one and first view of extent two. */
+    assert(ps5_mem_view_reserved(&state, first + 3 * PS5_MEM_VIEW_SIZE) == PS5_MEM_OK);
     assert(ps5_mem_view_mapped(&state, first + 3 * PS5_MEM_VIEW_SIZE) == PS5_MEM_OK);
     assert(ps5_mem_view_gpu_granted(&state, first + 3 * PS5_MEM_VIEW_SIZE) == PS5_MEM_OK);
+    assert(ps5_mem_view_reserved(&state, second) == PS5_MEM_OK);
     assert(ps5_mem_view_mapped(&state, second) == PS5_MEM_OK);
     assert(ps5_mem_view_gpu_granted(&state, second) == PS5_MEM_OK);
 
@@ -115,10 +119,26 @@ static void test_cross_extent_import_lifecycle(void) {
     assert(state.count == 0);
 }
 
+static void test_unmap_requires_explicit_reservation_restore(void) {
+    Ps5MemState state;
+    Ps5MemExtent storage[1];
+    const uint64_t view = 0x600000;
+    assert(ps5_mem_state_init(&state, storage, 1) == PS5_MEM_OK);
+    assert(ps5_mem_extent_add(&state, view, 21) == PS5_MEM_OK);
+    assert(ps5_mem_view_mapped(&state, view) == PS5_MEM_STATE);
+    assert(ps5_mem_view_reserved(&state, view) == PS5_MEM_OK);
+    assert(ps5_mem_view_mapped(&state, view) == PS5_MEM_OK);
+    assert(ps5_mem_view_unmapped(&state, view) == PS5_MEM_OK);
+    assert(ps5_mem_view_mapped(&state, view) == PS5_MEM_STATE);
+    assert(ps5_mem_view_reserved(&state, view) == PS5_MEM_OK);
+    assert(ps5_mem_view_mapped(&state, view) == PS5_MEM_OK);
+}
+
 int main(void) {
     test_extent_lifecycle();
     test_atomic_range_validation();
     test_extent_capacity_and_boundaries();
     test_cross_extent_import_lifecycle();
+    test_unmap_requires_explicit_reservation_restore();
     return 0;
 }
