@@ -56,6 +56,11 @@ Ps5MemResult ps5_mem_extent_add(Ps5MemState *state, uint64_t guest_base, uint64_
     if (find_extent(state, guest_base)) return PS5_MEM_STATE;
     for (i = 0; i < state->capacity; ++i) {
         Ps5MemExtent *e = &state->extents[i];
+        /* One SDK backing allocation must have exactly one guest owner. */
+        if (e->occupied && e->backing_handle == backing_handle) return PS5_MEM_STATE;
+    }
+    for (i = 0; i < state->capacity; ++i) {
+        Ps5MemExtent *e = &state->extents[i];
         if (!e->occupied) {
             memset(e, 0, sizeof(*e));
             e->guest_base = guest_base;
