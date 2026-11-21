@@ -338,7 +338,6 @@ bool import_dma_buf(uint64_t lo, uint64_t hi, Pool& p) {
 bool import_pool(uint64_t lo, uint64_t hi, Pool& p) {
     import_cooling = false;
     import_result = VK_SUCCESS;
-    if (import_on_hold(lo, hi)) return false;   // (tried recently and failed: not again until the hold ends)
     if (hi <= lo || hi - lo > max_import_size) {
         logf("vk: import %#llx..%#llx exceeds the device's allocation/buffer limit", (unsigned long long)lo,
              (unsigned long long)hi);
@@ -361,6 +360,9 @@ bool import_pool(uint64_t lo, uint64_t hi, Pool& p) {
         return false;
     }
 #endif
+    // Check the normalized range: on PS5, the 16 KiB expansion can overlap a
+    // recently refused neighboring import even when the original 4 KiB range did not.
+    if (import_on_hold(lo, hi)) return false;
     p.lo = lo;
     p.hi = hi;
     uint8_t* ptr = host->guest_base() + lo;
