@@ -2,6 +2,9 @@
    The desktop whole-window reservation is made in hos_main.c; "mapping" here is bookkeeping and zeroing. */
 #include "hos.h"
 #include "hos_mapped_pages.h"
+#if defined(A64_PS5)
+#include "ps5/memory.h"
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -179,6 +182,10 @@ static void discard_pages(uint64_t addr, uint64_t size) {
     }
     if (!discard || discard(GP(lo), (SIZE_T)(hi - lo)) != ERROR_SUCCESS)
         VirtualAlloc(GP(lo), (SIZE_T)(hi - lo), MEM_RESET, PAGE_READWRITE);
+#elif defined(A64_PS5)
+    if (ps5_memory_free_pages(lo, hi - lo) != 0)
+        hos_fatal(NULL, "PS5 guest page release failed at %#llx (%#llx bytes)",
+                  (unsigned long long)lo, (unsigned long long)(hi - lo));
 #elif !defined(__EMSCRIPTEN__)
     extern int hos_posix_guest_discard(void *p, size_t n);   /* (hos_main.c: MADV_REMOVE on the memfd window) */
     extern int rx_guest_imported(uint64_t lo, uint64_t hi);
@@ -376,6 +383,18 @@ HLE(_ZN2nn2os17FreeAddressRegionEm) {
 HLE(_ZN2nn2os19AllocateMemoryPagesEmm) {
     HOS_TRACE_CALL("AllocateMemoryPages");
     const uint64_t a = ARG(0), n = ARG(1), end = a + n;
+#if defined(A64_PS5)
+    if (ps5_memory_commit_pages(a, n) != 0) {
+        RET(0x1A01); /* out of guest direct memory or a failed mapping transition */
+        return;
+    }
+    LOCK();
+    hos_mapped_pages_set(&mapped_pages, a, n, 1);
+    mapped_pages_report_locked();
+    UNLOCK();
+    RET(0);
+    return;
+#endif
     LOCK();
     hos_mapped_pages_set(&mapped_pages, a, n, 1);
     mapped_pages_report_locked();
@@ -422,6 +441,18 @@ HLE(_ZN2nn2os19AllocateMemoryPagesEmm) {
 /* nn::os::FreeMemoryPages(unsigned long, unsigned long) -> Result */
 HLE(_ZN2nn2os15FreeMemoryPagesEmm) {
     HOS_TRACE_CALL("FreeMemoryPages");
+#if defined(A64_PS5)
+    if (ps5_memory_free_pages(ARG(0), ARG(1)) != 0) {
+        RET(0x1A01);
+        return;
+    }
+    LOCK();
+    hos_mapped_pages_set(&mapped_pages, ARG(0), ARG(1), 0);
+    mapped_pages_report_locked();
+    UNLOCK();
+    RET(0);
+    return;
+#endif
     /* This precedes the address-region path's early return: every successful
        AllocateMemoryPages report is removed by either free path. */
     LOCK();
