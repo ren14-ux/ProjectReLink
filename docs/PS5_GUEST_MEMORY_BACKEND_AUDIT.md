@@ -371,7 +371,9 @@ The coordinator now has additional safeguards:
 
 - The extent pool must be explicitly bound to the successfully reserved parent guest window before any fixed view can be adopted or mapped. View ranges are checked against that window with overflow-safe bounds.
 - Extent registration rejects guest addresses outside the bound window. Guest extent addresses in the state/backend APIs are absolute guest virtual addresses, not offsets from the window.
-- The 4 KiB page state exposes idempotent claim-missing and allocated-page-mask operations, plus snapshots of each view's reservation, mapping, GPU grant, and import-reference state. This is groundwork for a retryable page service; it is not yet the game's allocator.
+- The 4 KiB page state exposes idempotent claim-missing, allocated-page masks, deferred-free masks, and snapshots of each view's reservation, mapping, GPU grant, and import-reference state. Production service state uses a caller-owned open-addressed guest-base index, avoiding linear scans for large sparse extent sets.
+- Pages freed while a Vulkan view is imported are marked pending-free, not immediately reused or zeroed. The service reaps them after the import hold is released.
+- The renderer destroys the Vulkan buffer/memory allocation before dropping the service's import hold. Only after that hold is released can pending guest pages and their direct-memory backing be reclaimed.
 - A view is zeroed across its full 16 KiB range on its first mapping, before the mapping is published to the guest. Its initialized bit survives unmap/remap while the backing extent remains alive, and is reset when the slot is released and reused. Newly claimed 4 KiB pages still require their pending-zero transition to be completed before GPU import.
 
 The PS5 workflow now runs its guest-window diagnostic job when any `host/ps5/**`, `gpu/vk/vk_memory.cpp`, HOS memory/startup, build-preflight, or guest-pointer runtime files change. That workflow remains a diagnostic title-folder build, not a ProjectReLink game build.
