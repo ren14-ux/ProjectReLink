@@ -58,6 +58,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: PPSA00000-guest-window-probe
-          path: ProjectReLink/dist/PPSA00000/
+          path: ProjectReLink/dist/
           if-no-files-found: error
           retention-days: 14
