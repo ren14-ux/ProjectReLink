@@ -3,7 +3,7 @@
 The intended deliverable is a PS5 title folder, not an ELF:
 
 ```
-dist/PPSA00000/
+dist/FAKE00001/
 ├── eboot.bin
 ├── sce_sys/
 │   └── param.json
@@ -34,7 +34,7 @@ make -C tools/ps5
 The script builds the host-side native title tool/runtime if absent, compiles
 the reservation diagnostic with the pinned PS5 target wrapper, links the
 application CRT with the SDK import libraries, converts it to a PS5 module,
-signs the executable container, and assembles `dist/PPSA00000/`.
+signs the executable container, and assembles `dist/FAKE00001/`.
 
 Intermediate ELF files are kept under `build/ps5-guest-probe/`; they are not
 the deliverable. The title ID is a development placeholder and must be checked
