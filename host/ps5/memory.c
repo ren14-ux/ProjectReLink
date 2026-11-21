@@ -326,9 +326,12 @@ int ps5_memory_import_acquire(uint64_t guest_offset, uint64_t bytes) {
         pthread_mutex_unlock(&memory_mutex);
         return -1;
     }
-    r = commit_locked(begin, end - begin);
-    if (r == PS5_MEM_OK)
-        r = ps5_mem_backend_import_acquire(&service.state, absolute_address(begin), end - begin);
+    /*
+     * Imports may pin only pages the game has already committed through
+     * AllocateMemoryPages/hos_commit. Do not silently claim import-only pages:
+     * that would turn a renderer lifetime into permanent game-page ownership.
+     */
+    r = ps5_mem_backend_import_acquire(&service.state, absolute_address(begin), end - begin);
     pthread_mutex_unlock(&memory_mutex);
     return r == PS5_MEM_OK ? 0 : -1;
 }
