@@ -96,3 +96,18 @@ The upstream recipe expects a host Clang resource archive at `lib/linux/libclang
 The reference build script builds Mesa from the pinned source archive using the PS5 cross file and emits a provenance file recording the Mesa revision, SDK revision, assertion mode, and archive SHA-256. ReLink should preserve that provenance and use the release (assertions-off) archive for a game build; the debug archive is intended for driver development and CTS work.
 
 **Important scope boundary:** this pins the RADV source dependency, not a completed ReLink build. ReLink still needs a dedicated PS5 build target, static renderer linkage (including `mkwvk_init`, `mkwvk_close_asked`, and `relink_program_set`), PS5 host/platform services, and the VideoOut `VK_KHR_display` presentation path. The current renderer's non-Windows startup still expects an SDL window bridge, so the direct RADV entry point alone cannot present a frame on PS5.
+
+
+## Verified PS5 display/WSI contract
+
+The PS5 homebrew reference documents the concrete RADV display path. VideoOut integration belongs to the PS5 RADV winsys; ReLink must not open VideoOut independently while this Vulkan WSI owns the display.
+
+1. Enable both `VK_KHR_surface` and `VK_KHR_display` at instance creation. The current ReLink instance extension list does not yet enable these PS5 display extensions.
+2. Query `vkGetPhysicalDeviceDisplayPropertiesKHR` and `vkGetDisplayModePropertiesKHR`. The console exposes one display and a finite set of modes. Do not assume 4K is always the best target: 1920x1080 and 2560x1440 are practical lower-pixel-count modes, with 3840x2160 also available.
+3. Create the surface with `vkCreateDisplayPlaneSurfaceKHR`, using the selected mode's visible region, identity transform and opaque alpha. The swapchain extent must match the selected display mode; VideoOut performs screen scaling.
+4. Select a graphics-capable queue family and verify it with `vkGetPhysicalDeviceSurfaceSupportKHR`. Use FIFO presentation and at least three swapchain images, subject to surface capabilities and supported formats.
+5. Keep display ownership in Vulkan WSI. Do not mix this path with a second direct VideoOut buffer/flip loop.
+
+Implementation consequence: add a dedicated `RELINK_PS5_RADV` instance-extension branch and a PS5 start path that creates the display surface before the existing queue/swapchain setup. The present path should continue using ordinary Vulkan swapchain acquire/submit/present. The current `start()` interprets a non-Windows argument as `MkwVkWindow`; passing a null or opaque PS5 value through that branch is invalid. The PS5 branch must bypass SDL bridge dereferences and derive its extent from the chosen display mode.
+
+This is a verified integration contract from the PS5 RADV/template documentation, not an implementation claim. The repository still needs the actual PS5 WSI branch, build target and host port before a console build can be attempted.
