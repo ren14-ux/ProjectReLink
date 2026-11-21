@@ -164,3 +164,45 @@ The existing probe's 64 GiB success is evidence for a 16 GiB reservation at that
 The current source already makes the base overrideable with the `A64_HOST_BASE` compile-time definition in `third_party/a64-kit/rt/a64.h`. That is the correct mechanism for a PS5-specific address choice: the PS5 build should provide one consistent value to every translation unit that includes the runtime header, while desktop defaults remain unchanged. `reserve_guest()` must still reserve exactly that base and the entire 512 GiB window, and startup must fail rather than accept a relocated result.
 
 The base change alone does not solve backing memory. The separate allocator/fault/decommit/GPU-import lifetime work remains required. No production base is selected in this audit, and no console probe or test was run.
+
+
+## PS5 build-driver audit: source and flag boundaries (2026-11-21)
+
+The PS5 compiler wrappers already exist in `third_party/a64-kit/tools/toolchain.py`:
+
+- `ps5_sdk_root()` verifies the installed SDK against `deps/ps5-payload-sdk.commit` and checks for the pinned compiler, linker, headers, and static runtime libraries.
+- `ps5_compiler(cxx=False)` selects `prospero-clang` or `prospero-clang++`; `ps5_linker()` selects `prospero-lld`.
+- These helpers are currently unreachable from `nx2/build.py` for a PS5 build because the unconditional `toolchain.ps5()` guard exits before the compiler is selected.
+
+The build driver needs more than a compiler switch. Its current source and flag graph is split into independent job groups:
+
+1. Lifted chunks and the generated A64 runtime are compiled with `flags()` plus `giant_flags()`. They include `a64.h`, so one PS5 `A64_HOST_BASE` definition must reach every one of these jobs.
+2. The standalone host source set is assembled by globbing `host/*.c`. It excludes desktop files only for Linux, and it adds `host/posix/*.c` for Linux. A PS5 target must instead use an explicit allowlist/platform source set; otherwise desktop entry points, Windows compatibility glue, SDL display code, or POSIX shims can leak into the title.
+3. The WebGPU renderer and Vulkan renderer have separate C++ job groups and separate flags. The existing PS5 RADV path is a static title link, not the desktop Vulkan DLL path. Its objects need `RELINK_PS5_RADV`, the PS5 SDK headers, and the same guest-base definition where they include the guest model.
+4. The final link currently has only Linux shared-object and Windows executable branches. PS5 needs its own ELF/PIE link recipe, the pinned linker script, static RADV archive, SDK C++ runtimes, platform library, and the required local-symbol/weak-symbol treatment. The title conversion/signing and `FAKE00001` folder packaging are separate final steps.
+
+A safe build-driver change should introduce a dedicated PS5 job plan rather than redefine `LINUX` as false and fall into the Windows branch. The PS5 plan must explicitly define:
+- compiler and linker selection;
+- per-group target flags and include paths;
+- an allowlisted set of lifted/runtime/host/RADV sources;
+- generated-code and runtime dependencies;
+- static RADV and SDK link inputs;
+- title conversion, signing, and folder packaging.
+
+### Memory mapping path narrowed by the pinned SDK
+
+The pinned SDK's `ps5_shm_map()` implementation provides a useful, concrete fixed-map sequence: it maps a slice of a 64 KiB-rounded direct-memory object at a requested guest address with `sceKernelMapDirectMemory(..., PS5_KERNEL_MAP_FIXED, ...)`. `ps5_shm_unmap(..., PS5_SHM_KEEP_RESERVED)` then restores a reservation at the same address. This confirms the mechanics of replacing a reserved virtual extent with direct-memory backing and restoring the hole on unmap.
+
+The pinned RADV driver independently allocates direct memory for its own GPU resources with `sceKernelAllocateDirectMemory()`, maps it with `sceKernelMapDirectMemory()`, and releases it with `sceKernelMunmap()` plus `sceKernelReleaseDirectMemory()`. Its allocation unit is 64 KiB; its GPU-visible mapping checks use the driver's own address-window rules.
+
+This still does not justify using `ps5_shm_create()` as ReLink's guest allocator:
+- `ps5_shm_create()` allocates one backing object for the requested size, rather than providing an on-demand allocator for arbitrary guest extents.
+- `ps5_shm_map()` exposes CPU protections only; RADV host-pointer import must still grant GPU read/write protection.
+- The SDK helper is not documented or demonstrated as safe from a SIGSEGV handler.
+- ReLink needs per-extent ownership, overlap-safe commits, zero-on-new-commit, decommit, and import-lifetime tracking across the 512 GiB guest window.
+
+### Implementation decision
+
+Do not remove the PS5 build guard yet. The next code change should be a dedicated PS5 build-plan skeleton that fails closed until the guest-memory backend and RADV archive are available, rather than a compiler-only toggle. The next memory implementation must build on fixed direct-memory views and explicit ownership metadata; first-touch mapping from a signal handler remains unproven and must not be assumed.
+
+No source build, console test, or title package was produced by this audit.
