@@ -47,8 +47,7 @@ Ps5SdkExtentResult ps5_sdk_extent_allocate(Ps5SdkExtentPool *pool, uint64_t *tok
                 PS5_SDK_EXTENT_BYTES, PS5_KERNEL_DIRECT_TYPE_CPU, &direct_start);
             if (result != 0) return PS5_SDK_EXTENT_KERNEL;
             if (direct_start < 0) {
-                /* A successful allocation must return a usable physical offset. */
-                (void)sceKernelReleaseDirectMemory(direct_start, PS5_SDK_EXTENT_BYTES);
+                /* Do not pass an invalid offset back to the kernel as a release. */
                 return PS5_SDK_EXTENT_KERNEL;
             }
             ++slot->generation;
