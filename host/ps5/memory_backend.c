@@ -10,8 +10,15 @@ Ps5MemResult ps5_mem_backend_allocate_extent(Ps5MemState *state,
 
     if (token_out) *token_out = PS5_SDK_EXTENT_NO_TOKEN;
     if (!state || !pool || !token_out ||
-        (guest_base & (PS5_MEM_EXTENT_SIZE - 1)))
+        (guest_base & (PS5_MEM_EXTENT_SIZE - 1)) || !pool->guest_window_bound ||
+        guest_base < pool->guest_window_base)
         return PS5_MEM_INVALID;
+    {
+        const uintptr_t offset = (uintptr_t)guest_base - pool->guest_window_base;
+        if (offset > pool->guest_window_bytes ||
+            PS5_MEM_EXTENT_SIZE > pool->guest_window_bytes - offset)
+            return PS5_MEM_INVALID;
+    }
 
     sdk_result = ps5_sdk_extent_allocate(pool, &token);
     if (sdk_result == PS5_SDK_EXTENT_FULL) return PS5_MEM_FULL;
