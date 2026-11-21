@@ -306,3 +306,41 @@ sh host/ps5/run-memory-state-tests.sh
 ```
 
 The runner compiles the C implementation with C11, pedantic warnings, and warnings-as-errors in a temporary directory. It is a host-side unit test only; it does not validate SDK calls, GPU timeline integration, PS5 mapping semantics, or title startup. The PS5 preflight now requires both `memory_state.c` and `memory_state.h` as part of the eventual backend source set, while the actual `memory.c` adapter remains a separate missing prerequisite.
+
+## Pinned PayloadSDK shared-memory API contract
+
+The pinned PayloadSDK revision `b83202be73e930050e00de0f1b4d9ec46c0391bf` was inspected directly at:
+
+- `platform/include/ps5platform/shm.h`
+- `platform/src/shm.c`
+- `platform/include/ps5platform/kernel.h`
+
+The public adapter signatures are:
+
+- `ps5_shm_create(size_t bytes, struct ps5_shm *shm)`
+- `ps5_shm_destroy(struct ps5_shm *shm)`
+- `ps5_shm_map(const struct ps5_shm *, size_t offset, size_t bytes, void *address, int protection, unsigned flags, void **view)`
+- `ps5_shm_unmap(void *view, size_t bytes, unsigned flags)`
+- `ps5_vrange_reserve(size_t bytes, void *hint, size_t alignment, void **base)`
+- `ps5_vrange_release(void *base, size_t bytes)`
+
+The platform kernel header declares `sceKernelAllocateDirectMemory`, `sceKernelReleaseDirectMemory`, `sceKernelMapDirectMemory`, `sceKernelReserveVirtualRange`, `sceKernelMunmap`, and `sceKernelMprotect`. Its declared direct-memory granularity is 64 KiB and page granularity is 16 KiB. GPU read/write protection bits are separate from the CPU mapping flags.
+
+### Adapter implications
+
+1. Prefer the SDK `ps5_shm` wrapper for physical extent allocation and view mapping instead of duplicating its direct-memory arithmetic.
+2. The `ps5_shm` object records the direct-memory start and rounded allocation size, but does not track individual views or prevent premature destruction. ReLink's extent-state manager must remain the ownership authority.
+3. `ps5_shm_map()` maps CPU protections and handles execute permission separately. GPU permission still requires an explicit protection operation and a successful result before ReLink records the GPU-granted state.
+4. `ps5_shm_unmap(..., PS5_SHM_KEEP_RESERVED)` first unmaps the view and then attempts to reserve the hole again. If the reserve step fails, the original mapping is already gone and the hole may remain unreserved. The adapter must report this as a partial transition and preserve enough metadata for recovery; it must not pretend the operation was atomic.
+5. `ps5_vrange_reserve()` delegates to placement search. Its interface accepts a hint and alignment, not an exact-address guarantee. It is therefore not sufficient evidence for reserving ReLink's fixed 512 GiB window at `A64_HOST_BASE`.
+6. `ps5_shm_destroy()` calls `sceKernelReleaseDirectMemory()` without checking whether views remain. ReLink must call it only after all four 16 KiB views are unmapped, GPU permissions are revoked, and all Vulkan import references have retired after GPU completion.
+7. These declarations establish the pinned SDK's source-level interface, not successful runtime behavior on the user's console. No console probe, build, or runtime test was performed for this audit.
+
+### Remaining adapter blockers
+
+- A proven exact-address reservation path for the complete guest window.
+- Recovery logic for the SDK's unmap-then-reserve partial failure.
+- A production adapter that connects the SDK object and view handles to `Ps5MemState`.
+- Renderer callbacks that release import references only after the GPU timeline reports completion.
+
+Until these are implemented, the SDK calls must not be wired into guest allocation/free paths.
