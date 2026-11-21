@@ -78,13 +78,15 @@ compile -std=c11 -O2 -Wall -Wextra -ffunction-sections -fdata-sections \
   -c "$root/tools/ps5/guest_window_probe_main.c" -o "$work/obj/main.o"
 compile -std=c11 -O2 -Wall -Wextra -ffunction-sections -fdata-sections \
   -c "$root/tools/ps5/guest_window_probe.c" -o "$work/obj/guest_window_probe.o"
+compile -std=c11 -O2 -Wall -Wextra -ffunction-sections -fdata-sections \
+  -c "$root/host/ps5/guest_window.c" -o "$work/obj/guest_window.o"
 compile -std=c++20 -O2 -Wall -Wextra -fno-exceptions -fno-rtti \
   -ffunction-sections -fdata-sections -c "$native/app_crt.cpp" -o "$work/obj/app_crt.o"
 
 "$sdk/bin/prospero-lld" -T "$linker_script" -L "$native" --eh-frame-hdr \
   --version-script "$native/app-symbols.map" --exclude-libs=ALL \
   -e _start -o "$work/llvm-pie.elf" \
-  "$work/obj/app_crt.o" "$work/obj/main.o" "$work/obj/guest_window_probe.o" \
+  "$work/obj/app_crt.o" "$work/obj/main.o" "$work/obj/guest_window_probe.o" "$work/obj/guest_window.o" \
   --start-group "$sdk/target/lib/libc++.a" "$sdk/target/lib/libc++abi.a" \
   "$sdk/target/lib/libunwind.a" "$builtins" "$sdk/target/lib/libps5platform.a" --end-group \
   --as-needed "${sdk_stubs[@]}"
