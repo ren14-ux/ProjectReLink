@@ -443,6 +443,9 @@ bool import_pool(uint64_t lo, uint64_t hi, Pool& p) {
 #ifdef __linux__
     if (import_dma_buf(lo, hi, p)) {
         t1 = t2 = t3 = t4 = clk::now();
+#if defined(RELINK_PS5_RADV)
+        ps5_hold.transfer(p);
+#endif
         return true;
     }
 #endif
@@ -489,6 +492,7 @@ bool import_pool(uint64_t lo, uint64_t hi, Pool& p) {
     ai.memoryTypeIndex = type;
     const VkResult allocated = vkAllocateMemory(dev.device, &ai, nullptr, &p.memory);
     if (allocated != VK_SUCCESS && getenv("RX_VK_IMPORT_DIAG")) {
+#if !defined(RELINK_PS5_RADV)
         // (diagnostics, RX_VK_IMPORT_DIAG=1: every refused import, with what overlaps it and the pages' Windows state)
         size_t live_over = 0;
         uint64_t live_bytes = 0;
@@ -513,6 +517,10 @@ bool import_pool(uint64_t lo, uint64_t hi, Pool& p) {
              "(%llu MB), %zu retired; %d regions:%s", (unsigned long long)lo, (unsigned long long)hi,
              (unsigned long long)(bytes >> 10), (unsigned long long)((uintptr_t)ptr & 0xFFFF), (int)allocated, live_over,
              imported.size(), (unsigned long long)(live_bytes >> 20), retired_pools_count(), nreg, regions);
+#else
+        logf("vk: PS5 host-pointer import %#llx..%#llx refused (%d)",
+             (unsigned long long)lo, (unsigned long long)hi, (int)allocated);
+#endif
     }
     if (allocated != VK_SUCCESS) {
         import_result = allocated;
