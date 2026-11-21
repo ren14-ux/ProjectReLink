@@ -172,6 +172,16 @@ Ps5SdkExtentResult ps5_sdk_extent_map_view(Ps5SdkExtentPool *pool, uint64_t toke
         (void)ps5_shm_unmap(mapped, PS5_SDK_EXTENT_VIEW_BYTES, 0);
         return PS5_SDK_EXTENT_KERNEL;
     }
+    /*
+     * Direct-memory units may be recycled with their old contents. Zero the
+     * complete view on its first mapping, before publishing it to the guest.
+     * Later remaps preserve live pages; newly claimed 4 KiB pages are zeroed
+     * by the page-ownership layer before they are marked initialized.
+     */
+    if (!(slot->initialized_mask & (uint8_t)(1u << view_index))) {
+        memset(mapped, 0, PS5_SDK_EXTENT_VIEW_BYTES);
+        slot->initialized_mask |= (uint8_t)(1u << view_index);
+    }
     slot->views[view_index] = mapped;
     /* Keep the address so unmap can restore the parent-window reservation. */
     slot->reserved_mask &= (uint8_t)~(1u << view_index);
