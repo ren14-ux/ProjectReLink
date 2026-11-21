@@ -23,6 +23,20 @@ Ps5MemResult ps5_mem_backend_allocate_extent(Ps5MemState *state,
                                              uint64_t guest_base,
                                              uint64_t *token_out);
 
+/* Kernel reservation first, then publish the matching memory-state transition. */
+Ps5MemResult ps5_mem_backend_reserve_view(Ps5MemState *state, Ps5SdkExtentPool *pool,
+                                          uint64_t guest_base, unsigned view_index,
+                                          void *address);
+Ps5MemResult ps5_mem_backend_release_view_reservation(Ps5MemState *state,
+                                                       Ps5SdkExtentPool *pool,
+                                                       uint64_t guest_base,
+                                                       unsigned view_index);
+Ps5MemResult ps5_mem_backend_map_view(Ps5MemState *state, Ps5SdkExtentPool *pool,
+                                      uint64_t guest_base, unsigned view_index,
+                                      void *address, int protection, void **view_out);
+Ps5MemResult ps5_mem_backend_unmap_view(Ps5MemState *state, Ps5SdkExtentPool *pool,
+                                        uint64_t guest_base, unsigned view_index);
+
 /*
  * Release a retired extent only after reservations, CPU mappings, GPU grants,
  * and Vulkan import holds have all drained. The state entry is forgotten only
