@@ -24,7 +24,7 @@ Ps5MemResult ps5_mem_backend_allocate_extent(Ps5MemState *state,
     if (sdk_result == PS5_SDK_EXTENT_FULL) return PS5_MEM_FULL;
     if (sdk_result != PS5_SDK_EXTENT_OK) return PS5_MEM_STATE;
 
-    state_result = ps5_mem_extent_add(state, guest_base, token);
+    state_result = ps5_mem_extent_add_trusted(state, guest_base, token);
     if (state_result == PS5_MEM_OK) {
         *token_out = token;
         return PS5_MEM_OK;
