@@ -195,8 +195,12 @@ static void test_guest_page_ownership_and_import_lifetime(void) {
     assert(mapped == 1 && gpu == 1 && imports[0] == 1);
     /* A live import prevents ownership changes to any 4 KiB subpage in its view. */
     assert(ps5_mem_pages_claim(&state, base, 0x1000) == PS5_MEM_BUSY);
+    assert(ps5_mem_pages_claim_missing(&state, base, 0x1000) == PS5_MEM_BUSY);
     assert(ps5_mem_pages_free(&state, page, 0x1000) == PS5_MEM_BUSY);
     assert(ps5_mem_import_release(&state, base, PS5_MEM_VIEW_SIZE) == PS5_MEM_OK);
+    assert(ps5_mem_pages_claim_missing(&state, base, 0x1000) == PS5_MEM_OK);
+    assert(ps5_mem_pages_mark_zeroed(&state, base, 0x1000) == PS5_MEM_OK);
+    assert(ps5_mem_pages_free(&state, base, 0x1000) == PS5_MEM_OK);
     assert(ps5_mem_pages_free(&state, page, 0x1000) == PS5_MEM_OK);
     assert(ps5_mem_extent_retire(&state, base) == PS5_MEM_OK);
     assert(!ps5_mem_extent_release_ready(&state, base));
