@@ -1242,6 +1242,12 @@ static void choose_present_queue() {
 
 #if defined(RELINK_PS5_RADV)
 static bool create_ps5_display_surface(uint32_t* out_width, uint32_t* out_height) {
+    if (!vkGetPhysicalDeviceDisplayPropertiesKHR || !vkGetPhysicalDeviceDisplayPlanePropertiesKHR ||
+        !vkGetDisplayPlaneSupportedDisplaysKHR || !vkGetDisplayModePropertiesKHR ||
+        !vkGetDisplayPlaneCapabilitiesKHR || !vkCreateDisplayPlaneSurfaceKHR) {
+        logf("vk: PS5: RADV display WSI entry points are incomplete");
+        return false;
+    }
     uint32_t display_count = 0;
     VkResult r = vkGetPhysicalDeviceDisplayPropertiesKHR(dev.physical, &display_count, nullptr);
     if (r != VK_SUCCESS || !display_count) {
@@ -1290,9 +1296,12 @@ static bool create_ps5_display_surface(uint32_t* out_width, uint32_t* out_height
     r = vkGetDisplayModePropertiesKHR(dev.physical, display, &mode_count, modes.data());
     if (r != VK_SUCCESS) return false;
     uint32_t selected_mode = 0;
+    uint64_t selected_area = UINT64_MAX;
     for (uint32_t i = 0; i < mode_count; ++i) {
         const VkExtent2D e = modes[i].parameters.visibleRegion;
+        const uint64_t area = (uint64_t)e.width * e.height;
         if (e.width == 1920 && e.height == 1080) { selected_mode = i; break; }
+        if (e.width && e.height && area < selected_area) selected_mode = i, selected_area = area;
     }
     const VkDisplayModeParametersKHR mode = modes[selected_mode].parameters;
     if (!mode.visibleRegion.width || !mode.visibleRegion.height) return false;
@@ -1312,9 +1321,15 @@ static bool create_ps5_display_surface(uint32_t* out_width, uint32_t* out_height
         return false;
     }
     si.transform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
+    if (plane_caps.supportedAlpha & VK_DISPLAY_PLANE_ALPHA_OPAQUE_BIT_KHR)
+        si.alphaMode = VK_DISPLAY_PLANE_ALPHA_OPAQUE_BIT_KHR;
+    else if (plane_caps.supportedAlpha & VK_DISPLAY_PLANE_ALPHA_GLOBAL_BIT_KHR)
+        si.alphaMode = VK_DISPLAY_PLANE_ALPHA_GLOBAL_BIT_KHR;
+    else {
+        logf("vk: PS5: display plane supports neither opaque nor global alpha");
+        return false;
+    }
     si.globalAlpha = 1.0f;
-    si.alphaMode = plane_caps.supportedAlpha & VK_DISPLAY_PLANE_ALPHA_OPAQUE_BIT_KHR
-                       ? VK_DISPLAY_PLANE_ALPHA_OPAQUE_BIT_KHR : VK_DISPLAY_PLANE_ALPHA_GLOBAL_BIT_KHR;
     si.imageExtent = mode.visibleRegion;
     r = vkCreateDisplayPlaneSurfaceKHR(dev.instance, &si, nullptr, &dev.surface);
     if (r != VK_SUCCESS) {
