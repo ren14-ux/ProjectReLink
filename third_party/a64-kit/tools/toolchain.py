@@ -1,4 +1,4 @@
-import os, shutil
+import os, re, shutil
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
