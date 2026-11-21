@@ -106,6 +106,11 @@ The same audit found two intentional 4 GiB limits that should not be confused wi
 - `A64_WRITE_TRACK` is enabled by default unless `RX_SOFT_WRITE_WATCH=0`; its dirty bitmap and `A64_MARK` indices cover the first 4 GiB only. PS5 must disable this path or redesign it before enabling GPU write tracking.
 - `hos_mem.c`'s `pages_used` bitmap covers the first 4 GiB only. The existing above-4-GiB `AllocateMemoryPages` branch deliberately avoids that bitmap and has separate zero-on-new-page behavior. Do not expand the bitmap to 512 GiB without analyzing memory cost and semantics.
 
+
+### Build-time guest-base guard
+
+The native runtime now rejects an `A64_PS5` build that does not explicitly define `A64_HOST_BASE`. PS5 builds also fail preprocessing if that base is not 16 KiB aligned. The desktop default remains unchanged. This deliberately does not select the 64 GiB probe hint as a production base: the existing probe source tests that candidate, but no successful 512 GiB reservation result from the user's console has been supplied. The future PS5 build must pass one explicitly selected base consistently to every translation unit, and that base must be validated against the complete guest-window size before enabling the allocator.
+
 ## Next console probe: contiguous guest-window reservation
 
 The SDK's virtual-address survey tested reservations only up to 16 GiB per call. It does not yet prove whether ReLink can reserve its whole guest window as one range or stitch together adjacent reservations. The address survey suggests testing from the 64 GiB base (`0x10_0000_0000)), below the 1 TiB refusal boundary.
