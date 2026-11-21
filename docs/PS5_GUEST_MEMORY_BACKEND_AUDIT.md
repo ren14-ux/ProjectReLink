@@ -206,3 +206,29 @@ This still does not justify using `ps5_shm_create()` as ReLink's guest allocator
 Do not remove the PS5 build guard yet. The next code change should be a dedicated PS5 build-plan skeleton that fails closed until the guest-memory backend and RADV archive are available, rather than a compiler-only toggle. The next memory implementation must build on fixed direct-memory views and explicit ownership metadata; first-touch mapping from a signal handler remains unproven and must not be assumed.
 
 No source build, console test, or title package was produced by this audit.
+
+## Pinned SDK allocator limits and ReLink bookkeeping
+
+A closer read of the pinned SDK implementation narrows what can safely be reused:
+
+- `ps5_shm_create(bytes)` makes one `sceKernelAllocateDirectMemory()` allocation rounded to 64 KiB. The `ps5_shm` object owns that single physical extent; it is not a suballocator, page table, or commit-on-demand arena.
+- `ps5_shm_map()` accepts 16 KiB-aligned offsets and lengths and can map a slice at a fixed virtual address. Its mapping protection is CPU-only: `kernel_protection()` translates only `PS5_SHM_READ/WRITE/EXEC`. GPU access is a later, separate `sceKernelMprotect()` operation performed by the pinned RADV host-pointer import path.
+- `ps5_shm_unmap(..., PS5_SHM_KEEP_RESERVED)` first calls `sceKernelMunmap()`, then calls `sceKernelReserveVirtualRange()` to restore the hole. If the second call fails, the view is gone and the virtual hole is not restored. A ReLink backend must handle this partial-failure state; it cannot treat unmap-plus-reserve as an atomic decommit.
+- `ps5_vrange_reserve()` rounds to 16 KiB and calls the SDK placement helper. That helper tries the hint and a list of 4 GiB-spaced candidates, calling `sceKernelReserveVirtualRange()` with flags 0. It is a placement search, not an exact-address reservation API. ReLink's 16 TiB fixed base therefore needs a direct fixed-range reservation path whose exact kernel semantics are confirmed, with a strict returned-address equality check.
+- `ps5_shm_destroy()` releases its direct-memory allocation without tracking whether views remain. The caller must enforce the documented lifetime rule: every view must be unmapped before destroy.
+
+The current ReLink memory bookkeeping adds two further incompatibilities that must be handled explicitly:
+
+- `hos_mapped_pages.h` tracks mapped state in 4 KiB units over the 512 GiB guest window. The SDK maps in 16 KiB pages. The PS5 backend must update four 4 KiB accounting entries for each successfully mapped 16 KiB page and must not report a partial map as committed.
+- `hos_mem.c` has a separate `pages_used` bitmap limited to the first 4 GiB, while `A64_WRITE_TRACK` in the A64 runtime also has first-4-GiB assumptions. These are not allocator ownership records and cannot safely be repurposed to track 64 KiB direct-memory extents across the whole guest window.
+
+### Implementation decision
+
+Do not wrap `ps5_shm_create/map/unmap` in a nominal `hos_commit()` and call that a complete backend. The next implementation must introduce explicit metadata for:
+- each 64 KiB direct-memory allocation and its 16 KiB guest-page views;
+- reservation, mapped, GPU-granted, imported, and decommitted states;
+- per-page and per-extent ownership/refcounts for overlapping commits;
+- partial failures while mapping multiple pages or restoring reservations;
+- RADV import holds and GPU completion before physical release.
+
+The SDK source confirms the primitive calls and their granularity, but it does not establish recoverable first-touch signal behavior or signal-handler safety for allocation/mapping calls. Until that is proven, PS5 must use explicit commit points and fail closed on uncommitted guest access rather than adding an unverified fault handler. No allocator implementation or runtime behavior is claimed by this audit.
