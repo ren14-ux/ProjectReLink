@@ -33,6 +33,27 @@ Ps5SdkExtentResult ps5_sdk_extent_pool_init(Ps5SdkExtentPool *pool,
     return PS5_SDK_EXTENT_OK;
 }
 
+Ps5SdkExtentResult ps5_sdk_extent_pool_bind_window(Ps5SdkExtentPool *pool,
+                                                    uintptr_t base, size_t bytes) {
+    if (!pool || !pool->slots || !base || !bytes || pool->count || pool->guest_window_bound ||
+        (base % PS5_SDK_EXTENT_BYTES) || (bytes % PS5_SDK_EXTENT_BYTES) ||
+        base > UINTPTR_MAX - bytes)
+        return PS5_SDK_EXTENT_INVALID;
+    pool->guest_window_base = base;
+    pool->guest_window_bytes = bytes;
+    pool->guest_window_bound = 1;
+    return PS5_SDK_EXTENT_OK;
+}
+
+static int pool_contains_view(const Ps5SdkExtentPool *pool, uintptr_t address) {
+    if (!pool || !pool->guest_window_bound ||
+        address < pool->guest_window_base ||
+        address > UINTPTR_MAX - PS5_SDK_EXTENT_VIEW_BYTES)
+        return 0;
+    return PS5_SDK_EXTENT_VIEW_BYTES <=
+           pool->guest_window_bytes - (size_t)(address - pool->guest_window_base);
+}
+
 Ps5SdkExtentResult ps5_sdk_extent_allocate(Ps5SdkExtentPool *pool, uint64_t *token_out) {
     size_t i;
     int64_t direct_start = -1;
@@ -72,7 +93,8 @@ Ps5SdkExtentResult ps5_sdk_extent_reserve_view(Ps5SdkExtentPool *pool, uint64_t 
     uint8_t bit;
 
     if (!address || view_index >= PS5_SDK_EXTENT_VIEW_COUNT ||
-        (uintptr_t)address % PS5_SDK_EXTENT_VIEW_BYTES != 0)
+        (uintptr_t)address % PS5_SDK_EXTENT_VIEW_BYTES != 0 ||
+        !pool_contains_view(pool, (uintptr_t)address))
         return PS5_SDK_EXTENT_INVALID;
     if (!decode_token(pool, token, &index, &generation)) return PS5_SDK_EXTENT_STALE;
     slot = &pool->slots[index];
@@ -123,7 +145,8 @@ Ps5SdkExtentResult ps5_sdk_extent_map_view(Ps5SdkExtentPool *pool, uint64_t toke
     int result;
     if (view_out) *view_out = NULL;
     if (!view_out || !address || view_index >= PS5_SDK_EXTENT_VIEW_COUNT ||
-        (uintptr_t)address % PS5_SDK_EXTENT_VIEW_BYTES != 0)
+        (uintptr_t)address % PS5_SDK_EXTENT_VIEW_BYTES != 0 ||
+        !pool_contains_view(pool, (uintptr_t)address))
         return PS5_SDK_EXTENT_INVALID;
     if (!decode_token(pool, token, &index, &generation)) return PS5_SDK_EXTENT_STALE;
     slot = &pool->slots[index];
