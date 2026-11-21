@@ -7,17 +7,13 @@
 Ps5GuestWindowResult ps5_guest_window_reserve(Ps5GuestWindow *window,
                                                uintptr_t base, size_t bytes) {
     void *actual;
-    uintptr_t end;
     int32_t result;
 
     if (!window || !base || !bytes || window->reserved ||
         (base % PS5_KERNEL_DIRECT_ALIGNMENT) != 0 ||
         (bytes % PS5_KERNEL_DIRECT_ALIGNMENT) != 0 ||
-        bytes > UINTPTR_MAX || base > UINTPTR_MAX - (uintptr_t)bytes)
+        base > UINTPTR_MAX - (uintptr_t)bytes)
         return PS5_GUEST_WINDOW_INVALID;
-
-    end = base + (uintptr_t)bytes;
-    (void)end;
     actual = (void *)base;
     result = sceKernelReserveVirtualRange(&actual, bytes, 0,
                                           PS5_KERNEL_DIRECT_ALIGNMENT);
