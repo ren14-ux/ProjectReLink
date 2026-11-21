@@ -24,6 +24,8 @@ Ps5SdkExtentResult ps5_sdk_extent_pool_init(Ps5SdkExtentPool *pool,
                                              size_t capacity) {
     if (!pool || !slots || !capacity || capacity > UINT32_MAX)
         return PS5_SDK_EXTENT_INVALID;
+    if (capacity > SIZE_MAX / sizeof(*slots))
+        return PS5_SDK_EXTENT_OVERFLOW;
     memset(slots, 0, capacity * sizeof(*slots));
     pool->slots = slots;
     pool->capacity = capacity;
