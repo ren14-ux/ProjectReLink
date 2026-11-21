@@ -69,7 +69,6 @@ Ps5SdkExtentResult ps5_sdk_extent_reserve_view(Ps5SdkExtentPool *pool, uint64_t 
     size_t index;
     uint32_t generation;
     Ps5SdkExtentSlot *slot;
-    void *reserved;
     uint8_t bit;
 
     if (!address || view_index >= PS5_SDK_EXTENT_VIEW_COUNT ||
@@ -79,7 +78,7 @@ Ps5SdkExtentResult ps5_sdk_extent_reserve_view(Ps5SdkExtentPool *pool, uint64_t 
     slot = &pool->slots[index];
     (void)generation;
     bit = (uint8_t)(1u << view_index);
-    if ((slot->reserved_mask | slot->mapped_mask) & bit)
+    if ((slot->reserved_mask | slot->mapped_mask | slot->restore_mask) & bit)
         return PS5_SDK_EXTENT_INVALID;
 
     /*
@@ -87,8 +86,7 @@ Ps5SdkExtentResult ps5_sdk_extent_reserve_view(Ps5SdkExtentPool *pool, uint64_t 
      * Reserving this subrange again would collide with that parent reservation.
      * Record the caller's ownership of the existing reservation only.
      */
-    reserved = address;
-    slot->reservations[view_index] = reserved;
+    slot->reservations[view_index] = address;
     slot->reserved_mask |= bit;
     return PS5_SDK_EXTENT_OK;
 }
@@ -100,8 +98,6 @@ Ps5SdkExtentResult ps5_sdk_extent_release_view_reservation(Ps5SdkExtentPool *poo
     uint32_t generation;
     Ps5SdkExtentSlot *slot;
     uint8_t bit;
-    int32_t result;
-
     if (view_index >= PS5_SDK_EXTENT_VIEW_COUNT) return PS5_SDK_EXTENT_INVALID;
     if (!decode_token(pool, token, &index, &generation)) return PS5_SDK_EXTENT_STALE;
     slot = &pool->slots[index];
