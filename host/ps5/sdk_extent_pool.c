@@ -62,15 +62,59 @@ Ps5SdkExtentResult ps5_sdk_extent_allocate(Ps5SdkExtentPool *pool, uint64_t *tok
     return PS5_SDK_EXTENT_FULL;
 }
 
-Ps5SdkExtentResult ps5_sdk_extent_get(Ps5SdkExtentPool *pool, uint64_t token,
-                                      const struct ps5_shm **shm_out) {
+Ps5SdkExtentResult ps5_sdk_extent_map_view(Ps5SdkExtentPool *pool, uint64_t token,
+                                           unsigned view_index, void *address,
+                                           int protection, void **view_out) {
     size_t index;
     uint32_t generation;
-    if (shm_out) *shm_out = NULL;
-    if (!shm_out) return PS5_SDK_EXTENT_INVALID;
+    Ps5SdkExtentSlot *slot;
+    void *mapped = NULL;
+    int result;
+    if (view_out) *view_out = NULL;
+    if (!view_out || !address || view_index >= PS5_SDK_EXTENT_VIEW_COUNT ||
+        (uintptr_t)address % PS5_SDK_EXTENT_VIEW_BYTES != 0)
+        return PS5_SDK_EXTENT_INVALID;
     if (!decode_token(pool, token, &index, &generation)) return PS5_SDK_EXTENT_STALE;
+    slot = &pool->slots[index];
     (void)generation;
-    *shm_out = &pool->slots[index].shm;
+    if (slot->mapped_mask & (uint8_t)(1u << view_index))
+        return PS5_SDK_EXTENT_INVALID;
+
+    result = ps5_shm_map(&slot->shm,
+                         (size_t)view_index * PS5_SDK_EXTENT_VIEW_BYTES,
+                         PS5_SDK_EXTENT_VIEW_BYTES, address, protection,
+                         PS5_SHM_FIXED, &mapped);
+    if (result != 0) return PS5_SDK_EXTENT_KERNEL;
+    if (mapped != address) {
+        /* Fixed placement must be exact; undo any unexpected mapping. */
+        (void)ps5_shm_unmap(mapped, PS5_SDK_EXTENT_VIEW_BYTES, 0);
+        return PS5_SDK_EXTENT_KERNEL;
+    }
+    slot->views[view_index] = mapped;
+    slot->mapped_mask |= (uint8_t)(1u << view_index);
+    *view_out = mapped;
+    return PS5_SDK_EXTENT_OK;
+}
+
+Ps5SdkExtentResult ps5_sdk_extent_unmap_view(Ps5SdkExtentPool *pool, uint64_t token,
+                                             unsigned view_index) {
+    size_t index;
+    uint32_t generation;
+    Ps5SdkExtentSlot *slot;
+    int result;
+    uint8_t bit;
+    if (view_index >= PS5_SDK_EXTENT_VIEW_COUNT) return PS5_SDK_EXTENT_INVALID;
+    if (!decode_token(pool, token, &index, &generation)) return PS5_SDK_EXTENT_STALE;
+    slot = &pool->slots[index];
+    (void)generation;
+    bit = (uint8_t)(1u << view_index);
+    if (!(slot->mapped_mask & bit) || !slot->views[view_index])
+        return PS5_SDK_EXTENT_INVALID;
+
+    result = ps5_shm_unmap(slot->views[view_index], PS5_SDK_EXTENT_VIEW_BYTES, 0);
+    if (result != 0) return PS5_SDK_EXTENT_KERNEL;
+    slot->views[view_index] = NULL;
+    slot->mapped_mask &= (uint8_t)~bit;
     return PS5_SDK_EXTENT_OK;
 }
 
@@ -82,6 +126,8 @@ Ps5SdkExtentResult ps5_sdk_extent_release(Ps5SdkExtentPool *pool, uint64_t token
     if (!decode_token(pool, token, &index, &generation)) return PS5_SDK_EXTENT_STALE;
     slot = &pool->slots[index];
     (void)generation;
+
+    if (slot->mapped_mask) return PS5_SDK_EXTENT_INVALID;
 
     /* Do not use ps5_shm_destroy(): the pinned SDK implementation discards
        the object even when sceKernelReleaseDirectMemory reports failure. */
