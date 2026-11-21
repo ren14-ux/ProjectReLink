@@ -59,6 +59,7 @@ Ps5MemResult ps5_mem_extent_add(Ps5MemState *state, uint64_t guest_base, uint64_
 
 /* Reservation is recorded after reserve succeeds; a fixed map consumes it. */
 Ps5MemResult ps5_mem_view_reserved(Ps5MemState *state, uint64_t guest_view);
+Ps5MemResult ps5_mem_view_reservation_released(Ps5MemState *state, uint64_t guest_view);
 /* Mapping/protection transitions are recorded only after the corresponding SDK call succeeds. */
 Ps5MemResult ps5_mem_view_mapped(Ps5MemState *state, uint64_t guest_view);
 /* Successful unmap clears mapped state; reserve again separately if the SDK restored a hole. */
