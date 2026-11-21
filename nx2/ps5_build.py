@@ -22,6 +22,7 @@ def preflight(root, toolchain):
     required_host = (
         "entry.c",       # title lifecycle and common game boot handoff
         "memory.c",      # explicit guest-page commit/decommit and Vulkan import lifetime service
+        "memory.h",
         "memory_state.c", # 4 KiB page / 16 KiB view / 64 KiB extent lifetime bookkeeping
         "memory_state.h",
         "memory_backend.c", # serialized mapping, import, and release coordinator
