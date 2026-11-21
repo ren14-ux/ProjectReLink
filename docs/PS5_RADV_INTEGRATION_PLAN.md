@@ -77,3 +77,22 @@ Do not disable Vulkan feature requirements to get past initialization. If the pi
 ## Current stopping boundary
 
 The repository can be prepared for the above seams, but a correct PS5 build cannot be produced from the ReLink source tree alone. The target-specific SDK, compatible RADV archive and title packaging toolchain are external dependencies. No local PS5 compiler or console test is available in this session, so no build or runtime success is claimed.
+
+
+## Pinned RADV dependency and link contract
+
+The reference PS5 Vulkan build pins its Mesa fork independently of the payload SDK. ReLink records the same Mesa revision used by `mihawk-99/PS5_Vulkan/tools/build-radv.sh`:
+
+- Mesa fork: `https://github.com/mihawk-99/PS5_Mesa`
+- Mesa revision: `1ba9874f478657ccf6da72ce55f0260164cc0bd0`
+- RADV build option: `-Dradv-winsys=ps5`
+- Expected release archive: `.deps/native/radv-release/lib/libvulkan_radeon.ps5.a`
+- SDK revision: see `deps/ps5-payload-sdk.commit`
+
+The upstream title link recipe in `PS5_Vulkan/tools/radv-link.sh` links the RADV archive whole (weak dispatch-table references otherwise leave entry points absent), then groups the SDK's `libc++.a`, `libc++abi.a`, `libunwind.a`, Clang x86-64 builtins, and `libps5platform.a`. It also wraps pthread stack/join functions, stream close/flush, and the platform heap/libc functions. ReLink must carry this complete recipe or a reviewed equivalent; linking only `libvulkan_radeon.ps5.a` is insufficient.
+
+The upstream recipe expects a host Clang resource archive at `lib/linux/libclang_rt.builtins-x86_64.a`, the SDK platform archive, and the PS5 PIE unwind linker script. It generates a version map to keep compatibility aliases local. These are hard link inputs, not optional conveniences.
+
+The reference build script builds Mesa from the pinned source archive using the PS5 cross file and emits a provenance file recording the Mesa revision, SDK revision, assertion mode, and archive SHA-256. ReLink should preserve that provenance and use the release (assertions-off) archive for a game build; the debug archive is intended for driver development and CTS work.
+
+**Important scope boundary:** this pins the RADV source dependency, not a completed ReLink build. ReLink still needs a dedicated PS5 build target, static renderer linkage (including `mkwvk_init`, `mkwvk_close_asked`, and `relink_program_set`), PS5 host/platform services, and the VideoOut `VK_KHR_display` presentation path. The current renderer's non-Windows startup still expects an SDL window bridge, so the direct RADV entry point alone cannot present a frame on PS5.
