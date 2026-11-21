@@ -34,7 +34,7 @@ reserve_exact(uintptr_t hint, size_t bytes, void **reserved)
              hint, at, bytes);
       const int release = sceKernelMunmap(at, bytes);
       if (release != 0) {
-         printf("guest-window: relocated-range release FAILED result=0x%08x; aborting probe\\n",
+         printf("guest-window: relocated-range release FAILED result=0x%08x; aborting probe\n",
                 (unsigned)release);
          return -2; /* Do not continue with a possibly occupied range. */
       }
@@ -88,7 +88,7 @@ probe_segments(unsigned count)
       --reserved;
       const int release = sceKernelMunmap(ranges[reserved], (size_t)SEGMENT_BYTES);
       if (release != 0) {
-         printf("guest-window: cleanup segment=%u FAILED result=0x%08x\\n",
+         printf("guest-window: cleanup segment=%u FAILED result=0x%08x\n",
                 reserved, (unsigned)release);
          cleanup_failed = 1;
       }
