@@ -10,6 +10,9 @@
                 HOS_NVN_CONTINUE=1 (go on past nvnBootstrapLoader). */
 #include "hos.h"
 #include "hos_paths.h"
+#if defined(A64_PS5)
+#include "ps5/guest_window.h"
+#endif
 #include "../gpu/vk/vk_api.h"
 #include "../gpu/vk/oot_cheat_items.h"
 #include "../gpu/vk/oot_teleport_capture.h"
@@ -146,10 +149,27 @@ static void *reserve_large(SIZE_T size) {
 extern int hos_guest_memfd;   /* (below) */
 #endif
 /* The guest window lives at the constant A64_HOST_BASE (rt/a64.h), so lifted code never loads its base. */
+#if defined(A64_PS5)
+static Ps5GuestWindow ps5_guest_window;
+#endif
 static int reserve_guest(void) {
 #if defined(A64_MEM_ZERO)
     hos_space_end = (uint64_t)(uintptr_t)&__global_base & ~0xFFFFULL;
     return hos_space_end >= (1ULL << 30);
+#elif defined(A64_PS5)
+    /* The build must supply a console-validated base. This reserves address space only;
+       physical backing and page commitment are implemented by a separate memory service. */
+    const Ps5GuestWindowResult result =
+        ps5_guest_window_reserve(&ps5_guest_window, (uintptr_t)A64_HOST_BASE,
+                                 (size_t)GUEST_SPACE);
+    if (result != PS5_GUEST_WINDOW_OK) {
+        hos_log("mem: PS5 guest-window reservation failed (%d)", (int)result);
+        return 0;
+    }
+    hos_log("mem: PS5 guest window reserved at %#llx (%llu MB)",
+            (unsigned long long)(uintptr_t)ps5_guest_window.address,
+            (unsigned long long)(ps5_guest_window.bytes >> 20));
+    return 1;
 #elif defined(_WIN32)
     /* Committed but untouched pages cost no physical memory. Write-watched: the renderer's buffer cache asks which
        pages changed (GetWriteWatch) so that it uploads only those (soft write watch builds mark pages themselves). */
