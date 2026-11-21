@@ -29,6 +29,7 @@ typedef struct Ps5SdkExtentSlot {
     uint8_t reserved_mask;
     uint8_t mapped_mask;
     uint8_t gpu_mask;
+    uint8_t restore_mask; /* mapped view was removed; fixed reservation still needs restoration */
     uint8_t occupied;
 } Ps5SdkExtentSlot;
 
@@ -44,7 +45,8 @@ typedef enum Ps5SdkExtentResult {
     PS5_SDK_EXTENT_FULL = -2,
     PS5_SDK_EXTENT_STALE = -3,
     PS5_SDK_EXTENT_KERNEL = -4,
-    PS5_SDK_EXTENT_OVERFLOW = -5
+    PS5_SDK_EXTENT_OVERFLOW = -5,
+    PS5_SDK_EXTENT_RESTORE_REQUIRED = -6
 } Ps5SdkExtentResult;
 
 /* Caller owns slot storage for the pool's lifetime; capacity must fit a token. */
@@ -55,14 +57,18 @@ Ps5SdkExtentResult ps5_sdk_extent_pool_init(Ps5SdkExtentPool *pool,
 /* Allocates one 64 KiB direct-memory extent and returns a generation token. */
 Ps5SdkExtentResult ps5_sdk_extent_allocate(Ps5SdkExtentPool *pool, uint64_t *token_out);
 
-/* Reserve/release one exact 16 KiB guest view before/after fixed mapping. */
+/* Adopt/release one 16 KiB slice of the already-reserved guest window. */
 Ps5SdkExtentResult ps5_sdk_extent_reserve_view(Ps5SdkExtentPool *pool, uint64_t token,
                                                unsigned view_index, void *address);
 Ps5SdkExtentResult ps5_sdk_extent_release_view_reservation(Ps5SdkExtentPool *pool,
                                                             uint64_t token,
                                                             unsigned view_index);
+/* Retry restoration after an unmap succeeded but the kernel refused the fixed reservation. */
+Ps5SdkExtentResult ps5_sdk_extent_restore_view_reservation(Ps5SdkExtentPool *pool,
+                                                            uint64_t token,
+                                                            unsigned view_index);
 
-/* Map/unmap one fixed 16 KiB view. Mapping consumes its tracked reservation. */
+/* Map/unmap one fixed 16 KiB view inside the parent guest-window reservation. */
 Ps5SdkExtentResult ps5_sdk_extent_map_view(Ps5SdkExtentPool *pool, uint64_t token,
                                            unsigned view_index, void *address,
                                            int protection, void **view_out);
