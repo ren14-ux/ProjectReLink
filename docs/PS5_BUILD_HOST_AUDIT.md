@@ -97,3 +97,13 @@ The exact ReLink SDK pin `b83202be73e930050e00de0f1b4d9ec46c0391bf` was checked 
 This means the existing SDK pin is **not missing the platform layer**. The apparent discrepancy came from the pinned top-level README being the upstream SDK README; the fork's `platform/README.md` and setup script document the platform overlay. The pin is consistent with the RADV setup script's stated v0.42 base.
 
 The RADV title reference also shows why a normal compiler-driver link is not enough: its title script calls `prospero-lld` with a PS5 PIE unwind linker script, the title CRT/runtime objects, AGC import stubs, the whole RADV archive, grouped SDK C++/builtins/platform archives, the RADV platform wrappers and version maps. It then runs the PS5 title link/conversion tool and signs the output as `eboot.bin`. ReLink must adapt that exact flow while retaining its own entry point, runtime and imports; the template's test-title objects cannot simply be copied into ReLink.
+
+
+## Pinned SDK discovery contract added to ReLink
+
+`third_party/a64-kit/tools/toolchain.py` now has explicit PS5 SDK helpers:
+- `ps5_sdk_root()` requires `PS5_PAYLOAD_SDK`, reads ReLink's `deps/ps5-payload-sdk.commit`, compares it with the installed SDK's `.ps5-sdk-revision`, and checks for the compiler wrappers, target headers, linker and `libps5platform.a`.
+- `ps5_compiler(cxx=False)` returns the SDK's `prospero-clang` or `prospero-clang++` wrapper. Those wrappers set the PS5 target triple and sysroot; ReLink must not layer desktop `native_target()` flags on top.
+- `ps5_linker()` resolves the SDK's `prospero-lld`.
+
+These helpers are intentionally not wired into the normal compile loop yet. The current source selection and final link still assume the desktop host/runtime, a separate renderer library, and desktop dependency caches. The existing fail-fast guard remains until a PS5-specific source set and title-link implementation replace those assumptions.

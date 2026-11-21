@@ -7,6 +7,46 @@ def emsdk():
     return os.environ.get("EMSDK") or (r"C:\emsdk" if os.name == "nt" else os.path.expanduser("~/emsdk"))
 
 
+def ps5_sdk_root():
+    """The installed SDK must match deps/ps5-payload-sdk.commit; never accept an unpinned SDK."""
+    root = os.environ.get("PS5_PAYLOAD_SDK", "")
+    if not root:
+        raise SystemExit("RX_TARGET=ps5 requires PS5_PAYLOAD_SDK to point to the installed pinned payload SDK")
+    root = os.path.abspath(os.path.expanduser(root))
+    pin_file = os.path.normpath(os.path.join(HERE, "..", "..", "..", "deps", "ps5-payload-sdk.commit"))
+    try:
+        with open(pin_file, encoding="ascii") as f:
+            expected = f.read().strip()
+        with open(os.path.join(root, ".ps5-sdk-revision"), encoding="ascii") as f:
+            actual = f.read().strip()
+    except OSError as e:
+        raise SystemExit("PS5 SDK is not installed or its revision marker is missing: %s (%s)" % (root, e))
+    if not re.fullmatch(r"[0-9a-f]{40}", expected):
+        raise SystemExit("invalid PS5 SDK pin in %s" % pin_file)
+    if actual != expected:
+        raise SystemExit("PS5 SDK revision mismatch: expected %s, found %s in %s" % (expected, actual or "(empty)", root))
+    required = ("bin/prospero-clang", "bin/prospero-clang++", "bin/prospero-lld",
+                "target/include", "target/lib/libps5platform.a")
+    missing = [p for p in required if not os.path.exists(os.path.join(root, p))]
+    if missing:
+        raise SystemExit("pinned PS5 SDK is incomplete at %s: missing %s" % (root, ", ".join(missing)))
+    return root
+
+
+def ps5_compiler(cxx=False):
+    """Return the pinned SDK's target wrapper; it supplies x86_64-sie-ps5 and sysroot flags."""
+    root = ps5_sdk_root()
+    path = os.path.join(root, "bin", "prospero-clang++" if cxx else "prospero-clang")
+    if not os.path.isfile(path):
+        raise SystemExit("PS5 compiler wrapper not found: %s" % path)
+    return path
+
+
+def ps5_linker():
+    """Return the pinned SDK's PS5 linker wrapper."""
+    return os.path.join(ps5_sdk_root(), "bin", "prospero-lld")
+
+
 def ps5():
     """Explicit PS5 cross-target selection; the build driver must provide its own SDK and host implementation."""
     return os.environ.get("RX_TARGET", "").lower() == "ps5"
