@@ -40,8 +40,11 @@ probe_one_range(size_t bytes)
 {
    Ps5GuestWindow window = {0};
    const int result = reserve_exact((uintptr_t)BASE, bytes, &window);
-   if (result != 0)
+   if (result != 0) {
+      if (window.reserved && ps5_guest_window_release(&window) != PS5_GUEST_WINDOW_OK)
+         return -2;
       return result;
+   }
    printf("guest-window: contiguous reservation PASS base=%p bytes=0x%zx end=0x%" PRIxPTR "\n",
           window.address, bytes, (uintptr_t)window.address + bytes);
    const Ps5GuestWindowResult release = ps5_guest_window_release(&window);
@@ -59,8 +62,11 @@ probe_segments(unsigned count)
    for (unsigned i = 0; i < count; ++i) {
       const uintptr_t hint = (uintptr_t)(BASE + (uint64_t)i * SEGMENT_BYTES);
       result = reserve_exact(hint, (size_t)SEGMENT_BYTES, &ranges[i]);
-      if (result != 0)
+      if (result != 0) {
+         if (ranges[i].reserved)
+            ++reserved; /* retain cleanup ownership for a relocated reservation */
          break;
+      }
       ++reserved;
    }
 
