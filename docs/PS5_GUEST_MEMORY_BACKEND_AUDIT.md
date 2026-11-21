@@ -232,3 +232,20 @@ Do not wrap `ps5_shm_create/map/unmap` in a nominal `hos_commit()` and call that
 - RADV import holds and GPU completion before physical release.
 
 The SDK source confirms the primitive calls and their granularity, but it does not establish recoverable first-touch signal behavior or signal-handler safety for allocation/mapping calls. Until that is proven, PS5 must use explicit commit points and fail closed on uncommitted guest access rather than adding an unverified fault handler. No allocator implementation or runtime behavior is claimed by this audit.
+
+## Renderer dirty-page tracking is another PS5 integration gate
+
+The renderer's guest write-watch path is not currently safe to enable for the full PS5 guest window:
+
+- `gpu/render/rx_buffer.cpp` declares and scans `a64_dirty` as `1 << 27` bytes: one byte for each 4 KiB page in the 512 GiB guest window.
+- `third_party/a64-kit/rt/a64_rt.c` actually defines `a64_dirty` as only `1 << 20` bytes, and `third_party/a64-kit/rt/a64.h` indexes marks after truncating guest addresses to 32 bits. This is a first-4-GiB bitmap, not a 512-GiB bitmap.
+- `host/hos_mem.c:hos_mark_written()` likewise limits its page walk to `A64_DIRTY_PAGES`, whose current definition is the first 4 GiB.
+- The renderer uses these marks in `collect_written_pages()` to decide which guest pages need upload/synchronization. Its non-soft-write-watch fallback is platform write-watch behavior (Windows `GetWriteWatch`); that is not a PS5 implementation.
+
+Consequently, do not simply carry the desktop `A64_WRITE_TRACK` define into a PS5 build. Doing so would either leave guest writes above 4 GiB untracked or require changing the bitmap to a 128 MiB allocation and auditing every writer/reader and synchronization path. The renderer also needs a PS5-specific way to collect CPU-written pages that preserves its GPU coherency guarantees.
+
+A future implementation should choose and document one explicit mechanism before enabling the renderer:
+1. a correctly sized 512-GiB page bitmap (128 MiB) with 64-bit guest page indexing and all lifted/runtime/host writers marking it; or
+2. a PS5-supported page-protection/write-fault mechanism whose fault and retry semantics are demonstrated, with a safe fallback for concurrent CPU and GPU access.
+
+The first option has a material fixed-memory cost and requires checking every store/CAS/helper path. The second depends on platform behavior not established by the pinned SDK header declarations. Until one is implemented, the PS5 renderer cannot claim reliable incremental guest-memory uploads. This is separate from direct-memory allocation and Vulkan import lifetime.
