@@ -178,7 +178,11 @@ bool has_extension(const std::vector<VkExtensionProperties>& all, const char* na
 }
 
 bool create_instance() {
+#if !defined(RELINK_PS5_RADV)
+    // Reflex's implicit-layer discovery is a desktop driver integration. A PS5
+    // title has no desktop Vulkan layer registry or NVIDIA driver to query.
     reflex_enable_implicit_layer();
+#endif
     uint32_t version = VK_API_VERSION_1_0;
     if (vkEnumerateInstanceVersion) vkEnumerateInstanceVersion(&version);
     if (version < VK_API_VERSION_1_3) {
@@ -414,9 +418,13 @@ bool create_device() {
          has_extension(exts, VK_NV_DEVICE_DIAGNOSTIC_CHECKPOINTS_EXTENSION_NAME) ? (dev.checkpoints ? "yes, on" : "yes, off") : "no",
          dev.device_fault ? "yes (RX_VK_FAULT_INFO=1)" : "no");
     optional(VK_KHR_COOPERATIVE_MATRIX_EXTENSION_NAME, dev.coop_matrix);
+#if !defined(RELINK_PS5_RADV)
+    // These integrations are desktop-driver/runtime features, not part of the
+    // statically linked PS5 RADV title environment.
     dlss_device_extensions(want, exts);   // (relink: NVIDIA DLSS's, vk_dlss.cpp)
     fsr_device_extensions(want, exts);    // (relink: what AMD FSR's runtime takes by name, vk_fsr.cpp)
     reflex_device_extensions(want, exts);   // (relink: NVIDIA Reflex's, vk_reflex.cpp)
+#endif
     optional(VK_EXT_SHADER_ATOMIC_FLOAT_EXTENSION_NAME, dev.float_atomic_add);   // (relink: native float adds, emit_spirv_atomic.cpp)
     // (relink) EDEN_NX2_MAXRECONV=1: maximal reconvergence for programs with subgroup operations (emit_spirv.cpp). It needs
     // VK_KHR_shader_subgroup_uniform_control_flow. Off by default: a test
