@@ -382,7 +382,7 @@ int ps5_memory_shutdown(void) {
             break;
         }
     }
-    if (r != PS5_MEM_OK || service.state.count) {
+    if (r != PS5_MEM_OK || service.state.count || service.pool.count) {
         pthread_mutex_unlock(&memory_mutex);
         return -1;
     }
