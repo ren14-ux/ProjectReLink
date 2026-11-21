@@ -30,6 +30,7 @@ typedef struct Ps5SdkExtentSlot {
     uint8_t mapped_mask;
     uint8_t gpu_mask;
     uint8_t restore_mask; /* mapped view was removed; fixed reservation still needs restoration */
+    uint8_t initialized_mask; /* first map of each view has zeroed its full 16 KiB */
     uint8_t occupied;
 } Ps5SdkExtentSlot;
 
