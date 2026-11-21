@@ -205,8 +205,11 @@ Ps5MemResult ps5_mem_pages_free(Ps5MemState *state, uint64_t guest_address, uint
         uint64_t base = at & ~(PS5_MEM_EXTENT_SIZE - 1);
         unsigned page = (unsigned)((at - base) / PS5_MEM_PAGE_SIZE);
         Ps5MemExtent *e = find_extent(state, base);
+        unsigned view = page / PS5_MEM_PAGES_PER_VIEW;
         if (!e) return PS5_MEM_NOT_FOUND;
         if (!(e->allocated_pages & (UINT16_C(1) << page))) return PS5_MEM_STATE;
+        /* A page cannot be freed while its containing 16 KiB view is imported. */
+        if (e->import_refs[view]) return PS5_MEM_BUSY;
     }
     for (at = guest_address; at < end; at += PS5_MEM_PAGE_SIZE) {
         uint64_t base = at & ~(PS5_MEM_EXTENT_SIZE - 1);
@@ -231,6 +234,8 @@ Ps5MemResult ps5_mem_pages_mark_zeroed(Ps5MemState *state, uint64_t guest_addres
         if (!e) return PS5_MEM_NOT_FOUND;
         if (!(e->allocated_pages & (UINT16_C(1) << page)) ||
             !(e->zero_pending & (UINT16_C(1) << page))) return PS5_MEM_STATE;
+        if (!(e->mapped_mask & (1u << (page / PS5_MEM_PAGES_PER_VIEW))))
+            return PS5_MEM_STATE;
     }
     for (at = guest_address; at < end; at += PS5_MEM_PAGE_SIZE) {
         uint64_t base = at & ~(PS5_MEM_EXTENT_SIZE - 1);
