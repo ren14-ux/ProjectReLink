@@ -2693,15 +2693,15 @@ void bg_drain() {
     }
     for (auto& [lo, p] : ready) {
         auto imp = imported.find(lo);
-        if (!p.memory && p.ps5_import_held) {
 #if defined(RELINK_PS5_RADV)
+        if (!p.memory && p.ps5_import_held) {
             if (!ps5_import_release(p)) {
                 std::lock_guard lk(bg_mu);
                 bg_ready.push_back({lo, std::move(p)});
             }
-#endif
             continue;
         }
+#endif
         if (imp != imported.end() && imp->second.hi >= p.hi) {
             if (p.buffer) vkDestroyBuffer(dev.device, p.buffer, nullptr);
             if (p.memory) vkFreeMemory(dev.device, p.memory, nullptr);
