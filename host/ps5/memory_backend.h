@@ -42,6 +42,18 @@ Ps5MemResult ps5_mem_backend_grant_gpu_view(Ps5MemState *state, Ps5SdkExtentPool
 Ps5MemResult ps5_mem_backend_revoke_gpu_view(Ps5MemState *state, Ps5SdkExtentPool *pool,
                                              uint64_t guest_base, unsigned view_index);
 
+/* 4 KiB guest-page ownership, coordinated under the backend memory lock. */
+Ps5MemResult ps5_mem_backend_claim_pages(Ps5MemState *state,
+                                         uint64_t guest_address, uint64_t bytes);
+Ps5MemResult ps5_mem_backend_free_pages(Ps5MemState *state,
+                                        uint64_t guest_address, uint64_t bytes);
+Ps5MemResult ps5_mem_backend_mark_pages_zeroed(Ps5MemState *state,
+                                                uint64_t guest_address, uint64_t bytes);
+Ps5MemResult ps5_mem_backend_allocated_views(const Ps5MemState *state,
+                                             uint64_t guest_extent, uint8_t *view_mask_out);
+Ps5MemResult ps5_mem_backend_zero_pending(const Ps5MemState *state,
+                                          uint64_t guest_extent, uint16_t *page_mask_out);
+
 /* Vulkan imports hold every covered 16 KiB guest view until the import is retired. */
 Ps5MemResult ps5_mem_backend_import_acquire(Ps5MemState *state,
                                             uint64_t guest_address, uint64_t bytes);
