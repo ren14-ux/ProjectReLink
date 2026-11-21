@@ -106,6 +106,21 @@ The same audit found two intentional 4 GiB limits that should not be confused wi
 - `A64_WRITE_TRACK` is enabled by default unless `RX_SOFT_WRITE_WATCH=0`; its dirty bitmap and `A64_MARK` indices cover the first 4 GiB only. PS5 must disable this path or redesign it before enabling GPU write tracking.
 - `hos_mem.c`'s `pages_used` bitmap covers the first 4 GiB only. The existing above-4-GiB `AllocateMemoryPages` branch deliberately avoids that bitmap and has separate zero-on-new-page behavior. Do not expand the bitmap to 512 GiB without analyzing memory cost and semantics.
 
+## Next console probe: contiguous guest-window reservation
+
+The SDK's virtual-address survey tested reservations only up to 16 GiB per call. It does not yet prove whether ReLink can reserve its whole guest window as one range or stitch together adjacent reservations. The address survey suggests testing from the 64 GiB base (`0x10_0000_0000)), below the 1 TiB refusal boundary.
+
+A callable probe has been added at `tools/ps5/guest_window_probe.c`. It performs reservation-only tests (no direct-memory allocation and no guest-page writes):
+
+1. Try one 512 GiB reservation at 64 GiB.
+2. If that fails, try 32 adjacent 16 GiB reservations covering 64–576 GiB.
+3. If that fails, try one 448 GiB reservation covering 64–512 GiB.
+4. If that fails, try 28 adjacent 16 GiB reservations covering 64–512 GiB.
+
+Every successful reservation is released before the probe returns. The probe rejects a kernel-selected address that differs from the requested hint and cleans up any earlier segments if a later segment fails. This distinguishes a contiguous guest window from a set of disjoint regions and checks the final 64 GiB needed by the full 512 GiB layout.
+
+The probe is source-only at this stage. It must be compiled into a PS5 title and run on the target console. Until its output is available, neither the 512 GiB nor the reduced 448 GiB layout is considered confirmed.
+
 ## Decision
 
 Do not add a speculative `hos_mem_ps5.c` yet. The SDK provides enough primitives to design a direct-memory-backed arena, but the exact 512 GiB reservation, overlapping-commit bookkeeping, zeroing/decommit rules, and GPU-visible mapping/import contract must be established first. The PS5 build guard remains correct until these are implemented together.
