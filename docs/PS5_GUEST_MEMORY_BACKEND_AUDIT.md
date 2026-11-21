@@ -359,3 +359,16 @@ The pool is externally serialized; its new coordinator connection to `Ps5MemStat
 - Renderer callbacks that release import references only after the GPU timeline reports completion.
 
 Until these are implemented, the SDK calls must not be wired into guest allocation/free paths.
+
+
+## Follow-up: parent-window reservation and view restoration
+
+The backend's mapping contract has been corrected to match the startup reservation:
+
+- `hos_main.c` owns one exact 512 GiB reservation for the complete guest window.
+- A 16 KiB view inside that reservation must not issue a second overlapping reservation before mapping. The extent pool now adopts the already-reserved view as bookkeeping and maps its direct-memory backing at that exact address.
+- Unmapping a mapped view creates a hole. The extent pool now immediately attempts to reserve that exact 16 KiB slice again, preserving the parent window's reserved-address-space contract.
+- If the kernel unmap succeeds but the fixed reservation restoration fails, the slot records a separate `restore_mask`. The extent cannot be released or remapped until `ps5_sdk_extent_restore_view_reservation()` succeeds. The memory backend exposes a matching retry operation and updates state only after restoration succeeds.
+- Releasing a view's bookkeeping reservation does not unmap the parent guest window; it only relinquishes that extent slot's ownership record. The global guest-window owner remains responsible for the 512 GiB reservation.
+
+These changes fix the internal double-reservation mismatch in the coordinator. They do not establish that the full guest window can be reserved on every target firmware, nor do they implement the missing fault-driven first-touch path. The actual game allocator and renderer still do not call this backend.
