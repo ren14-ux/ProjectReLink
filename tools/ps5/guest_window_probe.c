@@ -27,7 +27,7 @@ reserve_exact(uintptr_t hint, size_t bytes, void **reserved)
    if (result != 0) {
       printf("guest-window: reserve hint=0x%" PRIxPTR " bytes=0x%zx result=0x%08x\n",
              hint, bytes, (unsigned)result);
-      return result;
+      return -1;
    }
    if ((uintptr_t)at != hint) {
       printf("guest-window: moved hint=0x%" PRIxPTR " actual=%p bytes=0x%zx; releasing\n",
@@ -55,7 +55,7 @@ probe_one_range(size_t bytes)
           range, bytes, (uintptr_t)range + bytes);
    const int release = sceKernelMunmap(range, bytes);
    printf("guest-window: contiguous release result=0x%08x\n", (unsigned)release);
-   return release;
+   return release == 0 ? 0 : -2;
 }
 
 static int
