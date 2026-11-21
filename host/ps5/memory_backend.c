@@ -33,6 +33,106 @@ Ps5MemResult ps5_mem_backend_allocate_extent(Ps5MemState *state,
     return state_result;
 }
 
+static Ps5MemResult backend_get_token(Ps5MemState *state, uint64_t guest_base,
+                                        uint64_t *token) {
+    return ps5_mem_extent_get_handle(state, guest_base, token);
+}
+
+Ps5MemResult ps5_mem_backend_reserve_view(Ps5MemState *state, Ps5SdkExtentPool *pool,
+                                          uint64_t guest_base, unsigned view_index,
+                                          void *address) {
+    uint64_t token;
+    Ps5MemResult sr;
+    Ps5SdkExtentResult kr;
+    if (!state || !pool || view_index >= PS5_MEM_VIEWS_PER_EXTENT ||
+        (guest_base & (PS5_MEM_EXTENT_SIZE - 1)) ||
+        (uintptr_t)address != guest_base + (uint64_t)view_index * PS5_MEM_VIEW_SIZE)
+        return PS5_MEM_INVALID;
+    sr = backend_get_token(state, guest_base, &token);
+    if (sr != PS5_MEM_OK) return sr;
+    kr = ps5_sdk_extent_reserve_view(pool, token, view_index, address);
+    if (kr != PS5_SDK_EXTENT_OK) return kr == PS5_SDK_EXTENT_STALE ? PS5_MEM_NOT_FOUND : PS5_MEM_STATE;
+    sr = ps5_mem_view_reserved(state, (uint64_t)(uintptr_t)address);
+    if (sr != PS5_MEM_OK) {
+        (void)ps5_sdk_extent_release_view_reservation(pool, token, view_index);
+        return sr;
+    }
+    return PS5_MEM_OK;
+}
+
+Ps5MemResult ps5_mem_backend_release_view_reservation(Ps5MemState *state,
+                                                       Ps5SdkExtentPool *pool,
+                                                       uint64_t guest_base,
+                                                       unsigned view_index) {
+    uint64_t token, address;
+    Ps5MemResult sr;
+    Ps5SdkExtentResult kr;
+    if (!state || !pool || view_index >= PS5_MEM_VIEWS_PER_EXTENT ||
+        (guest_base & (PS5_MEM_EXTENT_SIZE - 1)))
+        return PS5_MEM_INVALID;
+    address = guest_base + (uint64_t)view_index * PS5_MEM_VIEW_SIZE;
+    sr = backend_get_token(state, guest_base, &token);
+    if (sr != PS5_MEM_OK) return sr;
+    sr = ps5_mem_view_reservation_released(state, address);
+    if (sr != PS5_MEM_OK) return sr;
+    kr = ps5_sdk_extent_release_view_reservation(pool, token, view_index);
+    if (kr != PS5_SDK_EXTENT_OK) {
+        /* Restore bookkeeping: the kernel reservation remains live on failure. */
+        (void)ps5_mem_view_reserved(state, address);
+        return PS5_MEM_BUSY;
+    }
+    return PS5_MEM_OK;
+}
+
+Ps5MemResult ps5_mem_backend_map_view(Ps5MemState *state, Ps5SdkExtentPool *pool,
+                                      uint64_t guest_base, unsigned view_index,
+                                      void *address, int protection, void **view_out) {
+    uint64_t token;
+    Ps5MemResult sr;
+    Ps5SdkExtentResult kr;
+    if (view_out) *view_out = NULL;
+    if (!state || !pool || !view_out || view_index >= PS5_MEM_VIEWS_PER_EXTENT ||
+        (guest_base & (PS5_MEM_EXTENT_SIZE - 1)) ||
+        (uintptr_t)address != guest_base + (uint64_t)view_index * PS5_MEM_VIEW_SIZE)
+        return PS5_MEM_INVALID;
+    sr = backend_get_token(state, guest_base, &token);
+    if (sr != PS5_MEM_OK) return sr;
+    kr = ps5_sdk_extent_map_view(pool, token, view_index, address, protection, view_out);
+    if (kr != PS5_SDK_EXTENT_OK) return kr == PS5_SDK_EXTENT_STALE ? PS5_MEM_NOT_FOUND : PS5_MEM_STATE;
+    sr = ps5_mem_view_mapped(state, (uint64_t)(uintptr_t)address);
+    if (sr != PS5_MEM_OK) {
+        /* Mapping succeeded but state rejected it: unmap, then clear stale reservation state. */
+        (void)ps5_sdk_extent_unmap_view(pool, token, view_index);
+        (void)ps5_mem_view_reservation_released(state, (uint64_t)(uintptr_t)address);
+        *view_out = NULL;
+        return sr;
+    }
+    return PS5_MEM_OK;
+}
+
+Ps5MemResult ps5_mem_backend_unmap_view(Ps5MemState *state, Ps5SdkExtentPool *pool,
+                                        uint64_t guest_base, unsigned view_index) {
+    uint64_t token, address;
+    Ps5MemResult sr;
+    Ps5SdkExtentResult kr;
+    if (!state || !pool || view_index >= PS5_MEM_VIEWS_PER_EXTENT ||
+        (guest_base & (PS5_MEM_EXTENT_SIZE - 1)))
+        return PS5_MEM_INVALID;
+    address = guest_base + (uint64_t)view_index * PS5_MEM_VIEW_SIZE;
+    sr = backend_get_token(state, guest_base, &token);
+    if (sr != PS5_MEM_OK) return sr;
+    sr = ps5_mem_view_unmapped(state, address);
+    if (sr != PS5_MEM_OK) return sr;
+    kr = ps5_sdk_extent_unmap_view(pool, token, view_index);
+    if (kr != PS5_SDK_EXTENT_OK) {
+        /* Kernel mapping remains live on unmap failure; restore state masks. */
+        if (ps5_mem_view_reserved(state, address) == PS5_MEM_OK)
+            (void)ps5_mem_view_mapped(state, address);
+        return PS5_MEM_BUSY;
+    }
+    return PS5_MEM_OK;
+}
+
 Ps5MemResult ps5_mem_backend_release_extent(Ps5MemState *state,
                                             Ps5SdkExtentPool *pool,
                                             uint64_t guest_base) {
