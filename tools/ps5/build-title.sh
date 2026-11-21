@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Build a PS5 title folder (PPSA00000), using the native title pipeline.
+# Build a PS5 title folder (FAKE00001), using the native title pipeline.
 set -euo pipefail
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
 vulkan_root=${PS5_VULKAN_ROOT:-$root/../PS5_Vulkan}
 vulkan_revision=$(awk '!/^#/ && NF { print; exit }' "$root/deps/ps5-vulkan-toolchain.commit")
 sdk_revision=$(awk '!/^#/ && NF { print; exit }' "$root/deps/ps5-payload-sdk.commit")
-title_id=PPSA00000
+title_id=FAKE00001
 work="$root/build/ps5-guest-probe"
 app="$root/dist/$title_id"
 param="$root/tools/ps5/param.json"
@@ -52,8 +52,8 @@ import json, re, sys
 with open(sys.argv[1], encoding="utf-8") as source:
     p = json.load(source)
 title = sys.argv[2]
-if p.get("titleId") != title or not re.fullmatch(r"PPSA\d{5}", title):
-    raise SystemExit("param.json titleId does not match the expected PPSA title folder")
+if p.get("titleId") != title or not re.fullmatch(r"FAKE\d{5}", title):
+    raise SystemExit("param.json titleId does not match the expected FAKE homebrew title folder")
 if not re.fullmatch(r"\d{5}", p.get("conceptId", "")):
     raise SystemExit("param.json conceptId must contain five digits")
 if not re.fullmatch(r"[A-Z]{2}\d{4}-" + re.escape(title) + r"_00-[A-Z0-9]{16}", p.get("contentId", "")):
