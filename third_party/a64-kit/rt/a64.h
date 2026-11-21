@@ -62,8 +62,8 @@ typedef GuestContext Ctx;
 #ifndef A64_HOST_BASE
 #define A64_HOST_BASE 0x100000000000ULL   /* 16 TB: far from anything Windows or glibc map by default */
 #endif
-#if defined(A64_PS5) && ((A64_HOST_BASE & 0x3FFFULL) != 0)
-#error "A64_HOST_BASE must be aligned to the PS5 16 KiB virtual-page size"
+#if defined(A64_PS5) && ((A64_HOST_BASE & 0xFFFFULL) != 0)
+#error "A64_HOST_BASE must be aligned to the PS5 64 KiB direct-memory extent size"
 #endif
 #define A64_MEM ((uint8_t *)A64_HOST_BASE)
 #endif
