@@ -83,14 +83,17 @@ probe_segments(unsigned count)
              count, reserved);
    }
 
+   int cleanup_failed = 0;
    while (reserved) {
       --reserved;
       const int release = sceKernelMunmap(ranges[reserved], (size_t)SEGMENT_BYTES);
-      if (release != 0)
-         printf("guest-window: cleanup segment=%u result=0x%08x\n",
+      if (release != 0) {
+         printf("guest-window: cleanup segment=%u FAILED result=0x%08x\\n",
                 reserved, (unsigned)release);
+         cleanup_failed = 1;
+      }
    }
-   return result;
+   return cleanup_failed ? -2 : result;
 }
 
 /*
