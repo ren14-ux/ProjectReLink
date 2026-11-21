@@ -223,6 +223,16 @@ Ps5MemResult ps5_mem_backend_free_pages(Ps5MemState *state,
     return ps5_mem_pages_free(state, guest_address, bytes);
 }
 
+Ps5MemResult ps5_mem_backend_mark_pending_free(Ps5MemState *state,
+                                               uint64_t guest_address, uint64_t bytes) {
+    return ps5_mem_pages_mark_pending_free(state, guest_address, bytes);
+}
+
+Ps5MemResult ps5_mem_backend_pending_free(const Ps5MemState *state,
+                                          uint64_t guest_extent, uint16_t *page_mask_out) {
+    return ps5_mem_pages_pending_free(state, guest_extent, page_mask_out);
+}
+
 Ps5MemResult ps5_mem_backend_mark_pages_zeroed(Ps5MemState *state,
                                                 uint64_t guest_address, uint64_t bytes) {
     return ps5_mem_pages_mark_zeroed(state, guest_address, bytes);
