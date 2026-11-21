@@ -120,3 +120,11 @@ The PS5 display functions are part of the `VKX_INSTANCE` dispatch macro in `gpu/
 `host/rx_backend.c` now treats `RELINK_PS5_STATIC_VULKAN` as a single-renderer configuration: it calls the linked `mkwvk_init` directly, starts that renderer, and returns failure if either step fails. It no longer falls through to `wgr_start` (the desktop WebGPU backend) when the PS5 RADV renderer is unavailable. On a PS5 title, silently selecting a desktop fallback would be incorrect and could make renderer startup appear successful while no supported presentation path exists.
 
 This is a source-level control-flow correction only. The PS5 executable build still does not compile/link the renderer objects and RADV archive, and no PS5 build or runtime test has been performed.
+
+## PS5 guest-memory import alignment
+
+`gpu/vk/vk_memory.cpp` now rounds imported guest-pool ranges outward to 16 KiB when `RELINK_PS5_RADV` is enabled. This matches the pinned RADV PS5 winsys' `RADV_PS5_PAGE_BYTES` requirement for `radv_ps5_memory_grant_gpu()` and `buffer_from_ptr()`; the renderer's ordinary 4 KiB NVN bookkeeping boundaries are not sufficient for the kernel's GPU-access grant.
+
+The PS5 branch also excludes the desktop `VirtualQuery` / `VirtualAlloc(MEM_COMMIT)` import-time path. This is intentionally not replaced with a guessed PS5 syscall. It establishes a required host contract: the eventual PS5 guest-memory backend must commit the complete guest page range when the game maps it, before Vulkan imports it. If it does not, RADV's `sceKernelMprotect()` grant can fail. The existing `host/hos_mem.c` is not yet a PS5 implementation, so this change does not make guest memory or the PS5 build complete.
+
+This is a source-level integration change only; no compile or console test was run.
