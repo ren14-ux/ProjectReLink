@@ -170,13 +170,64 @@ Ps5SdkExtentResult ps5_sdk_extent_unmap_view(Ps5SdkExtentPool *pool, uint64_t to
     slot = &pool->slots[index];
     (void)generation;
     bit = (uint8_t)(1u << view_index);
-    if (!(slot->mapped_mask & bit) || !slot->views[view_index])
+    if (!(slot->mapped_mask & bit) || (slot->gpu_mask & bit) || !slot->views[view_index])
         return PS5_SDK_EXTENT_INVALID;
 
     result = ps5_shm_unmap(slot->views[view_index], PS5_SDK_EXTENT_VIEW_BYTES, 0);
     if (result != 0) return PS5_SDK_EXTENT_KERNEL;
     slot->views[view_index] = NULL;
     slot->mapped_mask &= (uint8_t)~bit;
+    return PS5_SDK_EXTENT_OK;
+}
+
+Ps5SdkExtentResult ps5_sdk_extent_set_gpu_access(Ps5SdkExtentPool *pool, uint64_t token,
+                                                  unsigned view_index, int protection) {
+    size_t index;
+    uint32_t generation;
+    Ps5SdkExtentSlot *slot;
+    uint8_t bit;
+    int32_t result;
+    const int gpu_bits = PS5_KERNEL_PROT_GPU_READ | PS5_KERNEL_PROT_GPU_WRITE;
+
+    if (view_index >= PS5_SDK_EXTENT_VIEW_COUNT ||
+        (protection & ~gpu_bits) || protection == 0)
+        return PS5_SDK_EXTENT_INVALID;
+    if (!decode_token(pool, token, &index, &generation)) return PS5_SDK_EXTENT_STALE;
+    slot = &pool->slots[index];
+    (void)generation;
+    bit = (uint8_t)(1u << view_index);
+    if (!(slot->mapped_mask & bit) || !slot->views[view_index])
+        return PS5_SDK_EXTENT_INVALID;
+    if (slot->gpu_mask & bit) return PS5_SDK_EXTENT_INVALID;
+
+    result = sceKernelMprotect(slot->views[view_index], PS5_SDK_EXTENT_VIEW_BYTES,
+                               protection);
+    if (result != 0) return PS5_SDK_EXTENT_KERNEL;
+    slot->gpu_mask |= bit;
+    return PS5_SDK_EXTENT_OK;
+}
+
+Ps5SdkExtentResult ps5_sdk_extent_revoke_gpu_access(Ps5SdkExtentPool *pool, uint64_t token,
+                                                      unsigned view_index) {
+    size_t index;
+    uint32_t generation;
+    Ps5SdkExtentSlot *slot;
+    uint8_t bit;
+    int32_t result;
+    const int cpu_protection = PS5_KERNEL_PROT_CPU_READ | PS5_KERNEL_PROT_CPU_WRITE;
+
+    if (view_index >= PS5_SDK_EXTENT_VIEW_COUNT) return PS5_SDK_EXTENT_INVALID;
+    if (!decode_token(pool, token, &index, &generation)) return PS5_SDK_EXTENT_STALE;
+    slot = &pool->slots[index];
+    (void)generation;
+    bit = (uint8_t)(1u << view_index);
+    if (!(slot->mapped_mask & bit) || !(slot->gpu_mask & bit) || !slot->views[view_index])
+        return PS5_SDK_EXTENT_INVALID;
+
+    result = sceKernelMprotect(slot->views[view_index], PS5_SDK_EXTENT_VIEW_BYTES,
+                               cpu_protection);
+    if (result != 0) return PS5_SDK_EXTENT_KERNEL;
+    slot->gpu_mask &= (uint8_t)~bit;
     return PS5_SDK_EXTENT_OK;
 }
 
@@ -189,7 +240,7 @@ Ps5SdkExtentResult ps5_sdk_extent_release(Ps5SdkExtentPool *pool, uint64_t token
     slot = &pool->slots[index];
     (void)generation;
 
-    if (slot->mapped_mask || slot->reserved_mask) return PS5_SDK_EXTENT_INVALID;
+    if (slot->mapped_mask || slot->reserved_mask || slot->gpu_mask) return PS5_SDK_EXTENT_INVALID;
 
     /* Do not use ps5_shm_destroy(): the pinned SDK implementation discards
        the object even when sceKernelReleaseDirectMemory reports failure. */
