@@ -249,3 +249,26 @@ A future implementation should choose and document one explicit mechanism before
 2. a PS5-supported page-protection/write-fault mechanism whose fault and retry semantics are demonstrated, with a safe fallback for concurrent CPU and GPU access.
 
 The first option has a material fixed-memory cost and requires checking every store/CAS/helper path. The second depends on platform behavior not established by the pinned SDK header declarations. Until one is implemented, the PS5 renderer cannot claim reliable incremental guest-memory uploads. This is separate from direct-memory allocation and Vulkan import lifetime.
+
+## Vulkan import lifetime: what the current renderer guarantees, and what PS5 must preserve
+
+The current Vulkan backend has a GPU-completion-aware lifetime model that a PS5 allocator must integrate with rather than replace with a simple CPU-side reference count:
+
+- `gpu/vk/vk_memory.cpp` tracks live imported guest ranges in the `imported` pool map. `memory_guest_imported(lo, hi)` checks overlap while holding `pools_mu`, and also checks retired pools whose import nodes are retained.
+- Pool/import retirement is tied to the renderer's `mem_completed` timeline value. Retired imports are destroyed only after their recorded value is complete; the release path then calls `release_uncovered(lo, hi)`.
+- Guest address-region frees are reported through `memory_guest_release(lo, hi)`. That function queues ranges under `released_mu`, coalescing adjacent ranges where possible. `released_drain()` later processes the queue while the pool lock is held.
+- `release_uncovered()` computes the portions not covered by live or GPU-pending imports before asking the host to give those guest pages back. This avoids unmapping memory still referenced by a submitted GPU workload.
+- The host memory layer has a separate distinction between a freed guest page and a page that can actually be discarded: `FreeMemoryPages` and `hos_region_free` preserve/zero ranges reported as imported, while non-imported ranges can be discarded or decommitted.
+
+Important platform limitation: the current `release_uncovered()` host decommit callback is guarded by `_WIN32`; `hos_region_release_gaps()` is also implemented only for the Windows backend. The Linux path retains its own discard behavior and does not provide a reusable PS5 direct-memory decommit implementation. The current renderer's pool/timeline bookkeeping is therefore a design reference, not a ready-made PS5 allocator bridge.
+
+PS5 backend requirements derived from this lifecycle:
+
+1. Keep each direct-memory extent alive while any mapped 16 KiB view or Vulkan import references it.
+2. A host import reference must remain held through the GPU timeline value that retires the corresponding Vulkan allocation, not merely until the CPU finishes creating or destroying the Vulkan object.
+3. When a guest range is freed, mark it logically free first; defer physical release for any extent with a live import or incomplete GPU timeline value.
+4. On retirement, release only the now-uncovered 16 KiB views. A 64 KiB direct-memory allocation may be released only when all four constituent views are unmapped and no import holds any part of the extent.
+5. Treat zeroing and decommit as distinct operations. If an import still references the extent, preserve the backing and zero only when the renderer's synchronization rules make that safe; never punch/unmap the backing out from under the GPU.
+6. Keep the PS5 state manager's transitions transactional: if any kernel map/unmap/protection call fails, retain enough state to retry or roll back without claiming the extent was released.
+
+This establishes the next safe implementation boundary: a standalone metadata/lifetime layer can track extent and view state, but the production adapter must receive explicit GPU-retirement notifications from the renderer before it can call `sceKernelReleaseDirectMemory`. No direct-memory release callback is wired to the existing renderer today.
