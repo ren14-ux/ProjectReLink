@@ -1,0 +1,63 @@
+name: PS5 guest-window title
+
+on:
+  push:
+    branches:
+      - ps5/option-a-vulkan-compat
+    paths:
+      - "tools/ps5/**"
+      - "deps/ps5-payload-sdk.commit"
+      - "deps/ps5-vulkan-toolchain.commit"
+      - ".github/workflows/ps5-guest-window-title.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-title-folder:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out Project ReLink
+        uses: actions/checkout@v4
+        with:
+          path: ProjectReLink
+
+      - name: Read pinned dependency revisions
+        id: pins
+        shell: bash
+        run: |
+          echo "vulkan=$(awk '!/^#/ && NF { print; exit }' ProjectReLink/deps/ps5-vulkan-toolchain.commit)" >> "$GITHUB_OUTPUT"
+          echo "sdk=$(awk '!/^#/ && NF { print; exit }' ProjectReLink/deps/ps5-payload-sdk.commit)" >> "$GITHUB_OUTPUT"
+
+      - name: Check out pinned PS5_Vulkan build tooling
+        uses: actions/checkout@v4
+        with:
+          repository: mihawk-99/PS5_Vulkan
+          ref: ${{ steps.pins.outputs.vulkan }}
+          path: PS5_Vulkan
+
+      - name: Check out pinned PS5 Payload SDK source
+        uses: actions/checkout@v4
+        with:
+          repository: mihawk-99/PS5_PayloadSDK
+          ref: ${{ steps.pins.outputs.sdk }}
+          path: PS5_PayloadSDK
+
+      - name: Prepare pinned SDK and host dependencies
+        working-directory: PS5_Vulkan
+        run: bash tools/setup-native-dependencies.sh
+
+      - name: Build PS5 title folder
+        working-directory: ProjectReLink
+        env:
+          PS5_VULKAN_ROOT: ${{ github.workspace }}/PS5_Vulkan
+        run: make -C tools/ps5
+
+      - name: Upload PPSA title folder
+        uses: actions/upload-artifact@v4
+        with:
+          name: PPSA00000-guest-window-probe
+          path: ProjectReLink/dist/PPSA00000/
+          if-no-files-found: error
+          retention-days: 14
