@@ -248,7 +248,7 @@ static uint64_t load_n(uint64_t a, uint32_t size) {
 }
 
 #if defined(A64_WRITE_TRACK)
-uint8_t a64_dirty[1u << 20];   /* (rt/a64.h A64_MARK) */
+uint8_t a64_dirty[A64_DIRTY_PAGES];   /* one mark per guest 4 KiB page */
 #endif
 
 /* The page is marked after the store, as recomp_store* do: the renderer clears a mark and then reads the page
