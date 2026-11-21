@@ -22,8 +22,12 @@ def preflight(root, toolchain):
     required_host = (
         "entry.c",       # title lifecycle and common game boot handoff
         "memory.c",      # exact guest reservation, commit/decommit, first-touch policy
-        "memory_state.c", # sparse 64 KiB extent / 16 KiB view lifetime bookkeeping
+        "memory_state.c", # 4 KiB page / 16 KiB view / 64 KiB extent lifetime bookkeeping
         "memory_state.h",
+        "memory_backend.c", # serialized mapping, import, and release coordinator
+        "memory_backend.h",
+        "sdk_extent_pool.c", # direct-memory allocation and fixed guest-view mapping
+        "sdk_extent_pool.h",
         "guest_window.c",  # exact virtual-address reservation and ownership
         "guest_window.h",
         "thread.c",      # PS5 thread, TLS, wait and synchronization services
