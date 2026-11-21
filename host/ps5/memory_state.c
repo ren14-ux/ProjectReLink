@@ -68,6 +68,20 @@ Ps5MemResult ps5_mem_extent_add(Ps5MemState *state, uint64_t guest_base, uint64_
     return PS5_MEM_FULL;
 }
 
+Ps5MemResult ps5_mem_view_reserved(Ps5MemState *state, uint64_t guest_view) {
+    uint64_t base;
+    unsigned view;
+    Ps5MemExtent *e;
+    Ps5MemResult r = view_location(guest_view, &base, &view);
+    if (r != PS5_MEM_OK) return r;
+    e = find_extent(state, base);
+    if (!e) return PS5_MEM_NOT_FOUND;
+    if (e->pending_release || (e->mapped_mask & (1u << view)) ||
+        (e->reserved_mask & (1u << view))) return PS5_MEM_STATE;
+    e->reserved_mask |= (uint8_t)(1u << view);
+    return PS5_MEM_OK;
+}
+
 Ps5MemResult ps5_mem_view_mapped(Ps5MemState *state, uint64_t guest_view) {
     uint64_t base;
     unsigned view;
@@ -76,7 +90,9 @@ Ps5MemResult ps5_mem_view_mapped(Ps5MemState *state, uint64_t guest_view) {
     if (r != PS5_MEM_OK) return r;
     e = find_extent(state, base);
     if (!e) return PS5_MEM_NOT_FOUND;
-    if (e->pending_release || (e->mapped_mask & (1u << view))) return PS5_MEM_STATE;
+    if (e->pending_release || (e->mapped_mask & (1u << view)) ||
+        !(e->reserved_mask & (1u << view))) return PS5_MEM_STATE;
+    e->reserved_mask &= (uint8_t)~(1u << view);
     e->mapped_mask |= (uint8_t)(1u << view);
     return PS5_MEM_OK;
 }
@@ -92,6 +108,7 @@ Ps5MemResult ps5_mem_view_unmapped(Ps5MemState *state, uint64_t guest_view) {
     if (!(e->mapped_mask & (1u << view)) || (e->gpu_mask & (1u << view)) || e->import_refs[view])
         return PS5_MEM_BUSY;
     e->mapped_mask &= (uint8_t)~(1u << view);
+    e->reserved_mask &= (uint8_t)~(1u << view);
     return PS5_MEM_OK;
 }
 
