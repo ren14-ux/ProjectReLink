@@ -225,6 +225,28 @@ uint64_t hos_region_release_gaps(uint64_t lo, uint64_t hi) {
     if (top > lo && VirtualFree(GP(lo), (SIZE_T)(top - lo), MEM_DECOMMIT)) done += top - lo;
     UNLOCK();
     return done;
+#elif defined(A64_PS5)
+    uint64_t done = 0;
+    LOCK();
+    const uint64_t floor = region_floor < HOS_SPACE_END ? region_floor : HOS_SPACE_END;
+    if (lo < floor) lo = floor;
+    if (hi > HOS_SPACE_END) hi = HOS_SPACE_END;
+    lo = (lo + 0xFFF) & ~0xFFFULL, hi &= ~0xFFFULL;
+    uint64_t top = hi;
+    for (int i = 0; i < nregions && top > lo; i++) {
+        const uint64_t a = regions[i].addr, b = (a + regions[i].size + 0xFFF) & ~0xFFFULL;
+        if (a >= top) continue;
+        if (b < top) {
+            const uint64_t gap = b > lo ? b : lo;
+            if (top > gap && ps5_memory_free_pages(gap, top - gap) == 0)
+                done += top - gap;
+        }
+        top = a & ~0xFFFULL;
+    }
+    if (top > lo && ps5_memory_free_pages(lo, top - lo) == 0)
+        done += top - lo;
+    UNLOCK();
+    return done;
 #else
     (void)lo, (void)hi;
     return 0;
