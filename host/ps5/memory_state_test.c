@@ -232,6 +232,29 @@ static void test_page_claim_range_is_atomic(void) {
     assert(ps5_mem_pages_claim(&state, 0x900001, 0x1000) == PS5_MEM_INVALID);
 }
 
+
+static void test_extent_index_stays_sorted(void) {
+    Ps5MemState state;
+    Ps5MemExtent storage[4];
+    uint64_t handle = 0;
+
+    assert(ps5_mem_state_init(&state, storage, 4) == PS5_MEM_OK);
+    assert(ps5_mem_extent_add(&state, 0x300000, 3) == PS5_MEM_OK);
+    assert(ps5_mem_extent_add(&state, 0x100000, 1) == PS5_MEM_OK);
+    assert(ps5_mem_extent_add(&state, 0x200000, 2) == PS5_MEM_OK);
+    assert(state.count == 3);
+    assert(storage[0].guest_base == 0x100000);
+    assert(storage[1].guest_base == 0x200000);
+    assert(storage[2].guest_base == 0x300000);
+    assert(ps5_mem_extent_get_handle(&state, 0x200000, &handle) == PS5_MEM_OK);
+    assert(handle == 2);
+    assert(ps5_mem_extent_retire(&state, 0x200000) == PS5_MEM_OK);
+    assert(ps5_mem_extent_forget(&state, 0x200000, &handle) == PS5_MEM_OK);
+    assert(handle == 2 && state.count == 2);
+    assert(storage[0].guest_base == 0x100000);
+    assert(storage[1].guest_base == 0x300000);
+}
+
 int main(void) {
     test_extent_lifecycle();
     test_atomic_range_validation();
@@ -241,5 +264,6 @@ int main(void) {
     test_reserved_view_blocks_extent_release();
     test_guest_page_ownership_and_import_lifetime();
     test_page_claim_range_is_atomic();
+    test_extent_index_stays_sorted();
     return 0;
 }
