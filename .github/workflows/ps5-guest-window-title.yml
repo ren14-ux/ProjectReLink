@@ -54,10 +54,10 @@ jobs:
           PS5_VULKAN_ROOT: ${{ github.workspace }}/PS5_Vulkan
         run: make -C tools/ps5
 
-      - name: Upload PPSA title folder
+      - name: Upload FAKE homebrew title folder
         uses: actions/upload-artifact@v4
         with:
-          name: PPSA00000-guest-window-probe
+          name: FAKE00001-guest-window-probe
           path: ProjectReLink/dist/
           if-no-files-found: error
           retention-days: 14
