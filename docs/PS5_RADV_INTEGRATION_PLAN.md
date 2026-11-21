@@ -128,3 +128,25 @@ This is a source-level control-flow correction only. The PS5 executable build st
 The PS5 branch also excludes the desktop `VirtualQuery` / `VirtualAlloc(MEM_COMMIT)` import-time path. This is intentionally not replaced with a guessed PS5 syscall. It establishes a required host contract: the eventual PS5 guest-memory backend must commit the complete guest page range when the game maps it, before Vulkan imports it. If it does not, RADV's `sceKernelMprotect()` grant can fail. The existing `host/hos_mem.c` is not yet a PS5 implementation, so this change does not make guest memory or the PS5 build complete.
 
 This is a source-level integration change only; no compile or console test was run.
+
+## Newly confirmed hard blocker: fixed guest address is not viable on the measured PS5
+
+The memory-backend audit compared ReLink's address contract with the pinned SDK's recorded console probe:
+
+- ReLink's native runtime folds a fixed host base of `0x100000000000` (16 TiB) into every lifted guest pointer.
+- `host/hos_main.c` attempts to reserve a contiguous `HOS_GUEST_SPACE` of 512 GiB at that exact address.
+- The pinned SDK probe records successful reservation of 16 GiB at 64 GiB, but no reservation at or above 1 TiB on the measured PS5 system software 12.09. It does not demonstrate that a 512 GiB range is available at 64 GiB either.
+
+Consequently, implementing a direct-memory allocator at the existing 16 TiB base would be premature: the reservation itself is not supported by the available console evidence. The pointer-width correction to `uintptr_t` fixes native address arithmetic but does not make the fixed virtual address reservable.
+
+### Required decision before allocator implementation
+
+The next engineering task is an address-layout redesign, not a `hos_commit_ps5()` implementation. Candidate approaches are:
+
+1. Select a lower fixed base and prove that the entire required guest range fits there; or
+2. Reduce the guest window and audit every image, heap, address-region, generated-code, and GPU-import assumption; or
+3. Introduce segmented guest mappings, which would require changing the constant-base pointer model and likely generated/runtime access paths.
+
+No option is selected by this change. The original 16 TiB base and 512 GiB reservation must remain unchanged until a complete compatibility analysis establishes a replacement. In particular, do not assume that the 16 GiB reservation result proves a 512 GiB reservation will work.
+
+The user has asked to skip console testing, so this work does not introduce or request another probe. The evidence above is source/documentation evidence from the pinned SDK's existing recorded probe, not a new test performed in this session. The PS5 target remains intentionally blocked; no allocator or title package is claimed to work.
