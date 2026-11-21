@@ -1341,6 +1341,22 @@ static bool create_ps5_display_surface(uint32_t* out_width, uint32_t* out_height
     logf("vk: PS5: selected display mode %ux%u at %u mHz", *out_width, *out_height, mode.refreshRate);
     return true;
 }
+
+static void destroy_ps5_presentation() {
+    if (dev.device) {
+        vkDeviceWaitIdle(dev.device);
+        for (VkSemaphore semaphore : dev.swap_rendered)
+            if (semaphore) vkDestroySemaphore(dev.device, semaphore, nullptr);
+        dev.swap_rendered.clear();
+        if (dev.swapchain) vkDestroySwapchainKHR(dev.device, dev.swapchain, nullptr);
+        dev.swapchain = VK_NULL_HANDLE;
+        dev.swap_images.clear();
+        dev.swap_extent = {};
+    }
+    if (dev.instance && dev.surface && vkDestroySurfaceKHR)
+        vkDestroySurfaceKHR(dev.instance, dev.surface, nullptr);
+    dev.surface = VK_NULL_HANDLE;
+}
 #endif
 
 int start(void* hwnd) {
@@ -1356,17 +1372,22 @@ int start(void* hwnd) {
 #endif
 #if defined(RELINK_PS5_RADV)
     uint32_t width = 0, height = 0;
-    if (!create_ps5_display_surface(&width, &height)) return 0;
+    if (!create_ps5_display_surface(&width, &height)) {
+        destroy_ps5_presentation();
+        return 0;
+    }
     VkBool32 ok = VK_FALSE;
     VkResult present = vkGetPhysicalDeviceSurfaceSupportKHR(dev.physical, dev.queue_family, dev.surface, &ok);
     if (present != VK_SUCCESS || !ok) {
         logf("vk: PS5: graphics queue cannot present to the selected display (result %d, supported %u)",
              (int)present, ok);
+        destroy_ps5_presentation();
         return 0;
     }
     choose_present_queue();
     if (!create_swapchain(width, height)) {
         logf("vk: PS5: swapchain creation failed for display mode %ux%u", width, height);
+        destroy_ps5_presentation();
         return 0;
     }
 #elif defined(_WIN32)
@@ -1412,6 +1433,9 @@ int start(void* hwnd) {
 #endif
     if (!started_up()) {
         logf("vk: renderer startup failed after window and swapchain initialization");
+#if defined(RELINK_PS5_RADV)
+        destroy_ps5_presentation();
+#endif
         return 0;
     }
     return 1;
