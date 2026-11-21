@@ -308,6 +308,21 @@ static const MkwVkRenderer *load_vulkan(const char *dll) {
 }
 
 int rx_start(void *hwnd) {
+#if defined(RELINK_PS5_STATIC_VULKAN)
+    /* A PS5 title has one in-process renderer. Do not fall through to the desktop WebGPU
+       backend: it is not part of the PS5 title and would leave a misleading "started" path. */
+    const MkwVkRenderer *r = load_vulkan(NULL);
+    if (!r) return 0;
+    if (!r->start(hwnd)) {
+        hos_log("rx: the statically linked PS5 Vulkan renderer could not start");
+        return 0;
+    }
+    vk = r;
+    hos_log("rx: renderer: PS5 RADV (statically linked)");
+    flush_early();
+    hos_prompts_announce();
+    return 1;
+#else
     const char *b = getenv("RX_BACKEND");
     const int eden = b && !_stricmp(b, "eden");
     if (!b || !_stricmp(b, "vulkan") || eden) {   /* (relink: Vulkan unless told otherwise; a started game has no RX_BACKEND) */
@@ -325,6 +340,7 @@ int rx_start(void *hwnd) {
     const int ok = wgr_start(hwnd);
     flush_early();
     return ok;
+#endif
 }
 /* (relink) relink --prepare-shaders: the Vulkan back end started with no window and no game, which prepares
    every shader in its start (gpu/vk/vk_main.cpp started_up) and is then let go. 0 when there is no usable Vulkan */
