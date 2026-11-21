@@ -83,16 +83,14 @@ Ps5SdkExtentResult ps5_sdk_extent_reserve_view(Ps5SdkExtentPool *pool, uint64_t 
     if ((slot->reserved_mask | slot->mapped_mask) & bit)
         return PS5_SDK_EXTENT_INVALID;
 
+    /*
+     * The complete 512 GiB guest window is already reserved by guest_window.c.
+     * Reserving this subrange again would collide with that parent reservation.
+     * Record the caller's ownership of the existing reservation only.
+     */
     reserved = address;
-    result = sceKernelReserveVirtualRange(&reserved, PS5_SDK_EXTENT_VIEW_BYTES,
-                                          PS5_KERNEL_MAP_FIXED,
-                                          PS5_SDK_EXTENT_VIEW_BYTES);
-    if (result != 0) return PS5_SDK_EXTENT_KERNEL;
-    if (reserved != address) {
-        (void)sceKernelMunmap(reserved, PS5_SDK_EXTENT_VIEW_BYTES);
-        return PS5_SDK_EXTENT_KERNEL;
-    }
-    slot->reservations[view_index] = address;
+    (void)result;
+    slot->reservations[view_index] = reserved;
     slot->reserved_mask |= bit;
     return PS5_SDK_EXTENT_OK;
 }
@@ -115,8 +113,7 @@ Ps5SdkExtentResult ps5_sdk_extent_release_view_reservation(Ps5SdkExtentPool *poo
         !slot->reservations[view_index])
         return PS5_SDK_EXTENT_INVALID;
 
-    result = sceKernelMunmap(slot->reservations[view_index], PS5_SDK_EXTENT_VIEW_BYTES);
-    if (result != 0) return PS5_SDK_EXTENT_KERNEL;
+    /* This is bookkeeping only: the parent guest-window reservation remains owned. */
     slot->reservations[view_index] = NULL;
     slot->reserved_mask &= (uint8_t)~bit;
     return PS5_SDK_EXTENT_OK;
@@ -160,6 +157,37 @@ Ps5SdkExtentResult ps5_sdk_extent_map_view(Ps5SdkExtentPool *pool, uint64_t toke
     return PS5_SDK_EXTENT_OK;
 }
 
+Ps5SdkExtentResult ps5_sdk_extent_restore_view_reservation(Ps5SdkExtentPool *pool,
+                                                            uint64_t token,
+                                                            unsigned view_index) {
+    size_t index;
+    uint32_t generation;
+    Ps5SdkExtentSlot *slot;
+    void *at;
+    int32_t result;
+    uint8_t bit;
+
+    if (view_index >= PS5_SDK_EXTENT_VIEW_COUNT) return PS5_SDK_EXTENT_INVALID;
+    if (!decode_token(pool, token, &index, &generation)) return PS5_SDK_EXTENT_STALE;
+    slot = &pool->slots[index];
+    (void)generation;
+    bit = (uint8_t)(1u << view_index);
+    if (!(slot->restore_mask & bit) || (slot->mapped_mask & bit) ||
+        !slot->reservations[view_index]) return PS5_SDK_EXTENT_INVALID;
+
+    at = slot->reservations[view_index];
+    result = sceKernelReserveVirtualRange(&at, PS5_SDK_EXTENT_VIEW_BYTES,
+                                          PS5_KERNEL_MAP_FIXED, PS5_SDK_EXTENT_VIEW_BYTES);
+    if (result != 0) return PS5_SDK_EXTENT_KERNEL;
+    if (at != slot->reservations[view_index]) {
+        (void)sceKernelMunmap(at, PS5_SDK_EXTENT_VIEW_BYTES);
+        return PS5_SDK_EXTENT_KERNEL;
+    }
+    slot->restore_mask &= (uint8_t)~bit;
+    slot->reserved_mask |= bit;
+    return PS5_SDK_EXTENT_OK;
+}
+
 Ps5SdkExtentResult ps5_sdk_extent_unmap_view(Ps5SdkExtentPool *pool, uint64_t token,
                                              unsigned view_index) {
     size_t index;
@@ -179,6 +207,24 @@ Ps5SdkExtentResult ps5_sdk_extent_unmap_view(Ps5SdkExtentPool *pool, uint64_t to
     if (result != 0) return PS5_SDK_EXTENT_KERNEL;
     slot->views[view_index] = NULL;
     slot->mapped_mask &= (uint8_t)~bit;
+
+    /*
+     * sceKernelMunmap leaves a hole. Restore the exact slice of the parent
+     * guest-window reservation before allowing it to be mapped again.
+     */
+    {
+        void *at = slot->reservations[view_index];
+        result = sceKernelReserveVirtualRange(&at, PS5_SDK_EXTENT_VIEW_BYTES,
+                                              PS5_KERNEL_MAP_FIXED,
+                                              PS5_SDK_EXTENT_VIEW_BYTES);
+        if (result != 0 || at != slot->reservations[view_index]) {
+            if (result == 0 && at != slot->reservations[view_index])
+                (void)sceKernelMunmap(at, PS5_SDK_EXTENT_VIEW_BYTES);
+            slot->restore_mask |= bit;
+            return PS5_SDK_EXTENT_RESTORE_REQUIRED;
+        }
+    }
+    slot->reserved_mask |= bit;
     return PS5_SDK_EXTENT_OK;
 }
 
@@ -244,7 +290,8 @@ Ps5SdkExtentResult ps5_sdk_extent_release(Ps5SdkExtentPool *pool, uint64_t token
     slot = &pool->slots[index];
     (void)generation;
 
-    if (slot->mapped_mask || slot->reserved_mask || slot->gpu_mask) return PS5_SDK_EXTENT_INVALID;
+    if (slot->mapped_mask || slot->reserved_mask || slot->gpu_mask || slot->restore_mask)
+        return PS5_SDK_EXTENT_INVALID;
 
     /* Do not use ps5_shm_destroy(): the pinned SDK implementation discards
        the object even when sceKernelReleaseDirectMemory reports failure. */
