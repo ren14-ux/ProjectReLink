@@ -62,7 +62,7 @@ typedef GuestContext Ctx;
 #endif
 #define A64_MEM ((uint8_t *)A64_HOST_BASE)
 #endif
-#define A64_PTR(a) (A64_MEM + (uint32_t)(a))
+#define A64_PTR(a) (A64_MEM + (uintptr_t)(a))
 
 /* Browser builds (A64_WRITE_TRACK): wasm has no page write watch, so every guest store marks its 4 KB page (first
    and last byte's: an unaligned store may cross a page); hos/web/win32.c's GetWriteWatch reads and clears the marks

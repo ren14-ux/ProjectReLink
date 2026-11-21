@@ -48,7 +48,7 @@ A source-level inconsistency must be resolved before implementing the PS5 alloca
 - However, `third_party/a64-kit/rt/a64.h` currently defines `A64_PTR(a)` as `A64_MEM + (uint32_t)(a)`. This truncates every guest offset to 32 bits.
 - `host/hos.h` defines `GP(a)` through `A64_PTR(a)`; host-side heap, system, and address-region helpers therefore appear to wrap offsets above 4 GiB into the first 4 GiB of the window.
 
-The runtime header's own description says it models a flat guest memory below 4 GiB, while the HOS layer describes and allocates a 39-bit guest address space. This is not merely a PS5-specific issue: it is an architectural mismatch in the current source tree. Before changing the cast, audit all lifted guest address producers and consumers, generated code assumptions, pointer arithmetic, and the host API contract. A blind change from `uint32_t` to `uint64_t` could alter the semantics of the lifter's 32-bit guest pointers even if it fixes host-side allocations.
+The runtime header's own description said it modeled a flat guest memory below 4 GiB, while the HOS layer describes and allocates a 39-bit guest address space. Inspection of `a64_rt.c` and the translator confirms that normal guest loads/stores and atomic helpers route through `A64_PTR`, and memory addresses are carried as `uint64_t`; the `uint32_t` cast was therefore inconsistent with the native 39-bit HOS map. The pointer conversion is now changed to `uintptr_t`: native 64-bit builds preserve the full guest offset, while wasm32 keeps its 32-bit pointer width. This is a source-level correction; it still needs compilation and runtime validation on native and wasm builds.
 
 ### Consequence
 
