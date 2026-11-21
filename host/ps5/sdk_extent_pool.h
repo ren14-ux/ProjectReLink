@@ -17,11 +17,15 @@ extern "C" {
 #endif
 
 #define PS5_SDK_EXTENT_BYTES ((size_t)0x10000)
+#define PS5_SDK_EXTENT_VIEW_BYTES ((size_t)0x4000)
+#define PS5_SDK_EXTENT_VIEW_COUNT 4u
 #define PS5_SDK_EXTENT_NO_TOKEN UINT64_C(0)
 
 typedef struct Ps5SdkExtentSlot {
     struct ps5_shm shm;
     uint32_t generation;
+    void *views[PS5_SDK_EXTENT_VIEW_COUNT];
+    uint8_t mapped_mask;
     uint8_t occupied;
 } Ps5SdkExtentSlot;
 
@@ -48,13 +52,16 @@ Ps5SdkExtentResult ps5_sdk_extent_pool_init(Ps5SdkExtentPool *pool,
 /* Allocates one 64 KiB direct-memory extent and returns a generation token. */
 Ps5SdkExtentResult ps5_sdk_extent_allocate(Ps5SdkExtentPool *pool, uint64_t *token_out);
 
-/* Resolve a live token for mapping; pointer remains valid until release. */
-Ps5SdkExtentResult ps5_sdk_extent_get(Ps5SdkExtentPool *pool, uint64_t token,
-                                      const struct ps5_shm **shm_out);
+/* Map/unmap one fixed 16 KiB view. Each extent supports four tracked views. */
+Ps5SdkExtentResult ps5_sdk_extent_map_view(Ps5SdkExtentPool *pool, uint64_t token,
+                                           unsigned view_index, void *address,
+                                           int protection, void **view_out);
+Ps5SdkExtentResult ps5_sdk_extent_unmap_view(Ps5SdkExtentPool *pool, uint64_t token,
+                                             unsigned view_index);
 
 /*
- * Releases the direct-memory backing. Caller must first unmap all views,
- * revoke GPU access, and retire every Vulkan import. A kernel failure leaves
+ * Releases the direct-memory backing. Tracked CPU views must already be unmapped;
+ * caller must also revoke GPU access and retire every Vulkan import. A kernel failure leaves
  * the slot and token intact so release can be retried.
  */
 Ps5SdkExtentResult ps5_sdk_extent_release(Ps5SdkExtentPool *pool, uint64_t token);
