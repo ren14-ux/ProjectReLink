@@ -37,10 +37,19 @@ typedef struct Ps5MemExtent {
     uint8_t occupied;
 } Ps5MemExtent;
 
+typedef struct Ps5MemIndexEntry {
+    uint64_t key;
+    uint32_t slot_plus_one;
+    uint8_t state; /* 0 empty, 1 occupied, 2 tombstone */
+} Ps5MemIndexEntry;
+
 typedef struct Ps5MemState {
     Ps5MemExtent *extents;
     size_t capacity;
     size_t count;
+    Ps5MemIndexEntry *guest_index; /* optional caller-owned open-addressed guest-base index */
+    size_t guest_index_capacity;   /* power of two, at least twice extent capacity */
+    size_t free_hint;
 } Ps5MemState;
 
 typedef enum Ps5MemResult {
@@ -59,6 +68,12 @@ typedef enum Ps5MemResult {
  * lock; this module deliberately contains no platform lock.
  */
 Ps5MemResult ps5_mem_state_init(Ps5MemState *state, Ps5MemExtent *storage, size_t capacity);
+Ps5MemResult ps5_mem_state_init_indexed(Ps5MemState *state, Ps5MemExtent *storage,
+                                       size_t capacity, Ps5MemIndexEntry *index,
+                                       size_t index_capacity);
+Ps5MemResult ps5_mem_state_reindex(Ps5MemState *state, Ps5MemExtent *storage,
+                                   size_t capacity, Ps5MemIndexEntry *index,
+                                   size_t index_capacity);
 
 /* Register a successfully allocated 64 KiB physical extent. */
 Ps5MemResult ps5_mem_extent_add(Ps5MemState *state, uint64_t guest_base, uint64_t backing_handle);
