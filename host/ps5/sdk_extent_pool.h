@@ -37,6 +37,9 @@ typedef struct Ps5SdkExtentPool {
     Ps5SdkExtentSlot *slots;
     size_t capacity;
     size_t count;
+    uintptr_t guest_window_base;
+    size_t guest_window_bytes;
+    uint8_t guest_window_bound;
 } Ps5SdkExtentPool;
 
 typedef enum Ps5SdkExtentResult {
@@ -53,6 +56,9 @@ typedef enum Ps5SdkExtentResult {
 Ps5SdkExtentResult ps5_sdk_extent_pool_init(Ps5SdkExtentPool *pool,
                                              Ps5SdkExtentSlot *slots,
                                              size_t capacity);
+/* Bind the pool to the exact parent reservation owned by Ps5GuestWindow. */
+Ps5SdkExtentResult ps5_sdk_extent_pool_bind_window(Ps5SdkExtentPool *pool,
+                                                    uintptr_t base, size_t bytes);
 
 /* Allocates one 64 KiB direct-memory extent and returns a generation token. */
 Ps5SdkExtentResult ps5_sdk_extent_allocate(Ps5SdkExtentPool *pool, uint64_t *token_out);
