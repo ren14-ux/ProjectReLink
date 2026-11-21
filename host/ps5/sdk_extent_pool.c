@@ -331,8 +331,11 @@ Ps5SdkExtentResult ps5_sdk_extent_release(Ps5SdkExtentPool *pool, uint64_t token
     result = sceKernelReleaseDirectMemory(slot->shm.direct_start, slot->shm.bytes);
     if (result != 0) return PS5_SDK_EXTENT_KERNEL;
 
-    memset(&slot->shm, 0, sizeof(slot->shm));
-    slot->occupied = 0;
+    {
+        const uint32_t generation_kept = slot->generation;
+        memset(slot, 0, sizeof(*slot));
+        slot->generation = generation_kept;
+    }
     --pool->count;
     return PS5_SDK_EXTENT_OK;
 }
