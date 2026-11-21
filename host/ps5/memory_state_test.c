@@ -67,6 +67,9 @@ static void test_extent_capacity_and_boundaries(void) {
     uint64_t handle = 0;
     assert(ps5_mem_extent_get_handle(&state, 0x300000, &handle) == PS5_MEM_OK);
     assert(handle == 1);
+    /* A second guest extent cannot alias the first extent's SDK handle. */
+    assert(ps5_mem_extent_add(&state, 0x400000, 1) == PS5_MEM_STATE);
+    assert(state.count == 1);
     assert(ps5_mem_extent_add(&state, 0x400000, 2) == PS5_MEM_FULL);
     assert(ps5_mem_extent_retire(&state, 0x300001) == PS5_MEM_INVALID);
     assert(ps5_mem_extent_retire(&state, 0x300000) == PS5_MEM_OK);
