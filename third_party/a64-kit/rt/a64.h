@@ -2,7 +2,7 @@
 
    The instruction bodies come from suyu's translator (lift/suyu/arm64_to_c.h), which writes C against a
    `GuestContext` and calls `recomp_load*` / `recomp_store*` / `recomp_ldxr` ...; this header supplies those
-   for Rexcomp: one flat guest memory below 4 GB (`A64_MEM + (uint32_t)addr`), no page table, no host bridge.
+   for Rexcomp: one flat guest memory in the native 39-bit HOS window (wasm32 uses 32-bit linear memory) (`A64_MEM + (uint32_t)addr`), no page table, no host bridge.
    The FP helpers and the rest of suyu's runtime header are generated next to the lifted code
    (a64_suyu.h, by lift/a64_rtgen.py) and included at the end. */
 #ifndef A64_H
@@ -10,7 +10,6 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <string.h>
-
 typedef struct GuestContext {
     uint64_t x[32];             /* x[31] is SP: suyu's translator spells SP as x[31] where the encoding means SP */
     uint64_t pc;                /* only written where the lifter stops a thread (traps, unhandled) */
