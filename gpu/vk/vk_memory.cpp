@@ -345,6 +345,22 @@ bool import_pool(uint64_t lo, uint64_t hi, Pool& p) {
         import_remember_failure(lo, hi);
         return false;
     }
+#if defined(RELINK_PS5_RADV)
+    // RADV's PS5 buffer_from_ptr grants GPU access in 16 KiB kernel pages.
+    // Expand the guest range before forming the host pointer; 4 KiB NVN page
+    // boundaries are not sufficient for sceKernelMprotect/VK_EXT_external_memory_host.
+    constexpr uint64_t host_page = 0x4000;
+    constexpr uint64_t host_mask = host_page - 1;
+    if (hi > UINT64_MAX - host_mask) return false;
+    lo &= ~host_mask;
+    hi = (hi + host_mask) & ~host_mask;
+    if (hi > host->guest_size() || hi <= lo || hi - lo > max_import_size) {
+        logf("vk: PS5 host import range %#llx..%#llx is outside the committed guest window",
+             (unsigned long long)lo, (unsigned long long)hi);
+        import_remember_failure(lo, hi);
+        return false;
+    }
+#endif
     p.lo = lo;
     p.hi = hi;
     uint8_t* ptr = host->guest_base() + lo;
@@ -366,6 +382,7 @@ bool import_pool(uint64_t lo, uint64_t hi, Pool& p) {
                  total, ms(a, b), ms(b, c), ms(c, d), ms(d, e), (unsigned long long)(n >> 10), (unsigned long long)(com >> 10));
         }
     } report{t0, t1, t2, t3, t4, committed, bytes};
+#if !defined(RELINK_PS5_RADV)
     // (pages the game has not touched yet may be only reserved: committed now, as the pool's memory is usable; a range
     // committed already is left alone: the call took milliseconds in the game's huge reservation)
     {
@@ -377,6 +394,10 @@ bool import_pool(uint64_t lo, uint64_t hi, Pool& p) {
             q = end;
         }
     }
+#else
+    // PS5 has no Win32 VirtualQuery/VirtualAlloc commit path. The PS5 guest-memory
+    // backend must commit each guest page when the game maps it, before this import.
+#endif
 #ifdef __linux__
     if (import_dma_buf(lo, hi, p)) {
         t1 = t2 = t3 = t4 = clk::now();
