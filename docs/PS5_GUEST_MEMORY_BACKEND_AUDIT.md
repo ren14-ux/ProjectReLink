@@ -87,26 +87,6 @@ Also confirmed in the current code:
 - `A64_WRITE_TRACK` is enabled by default in `nx2/build.py`, unless `RX_SOFT_WRITE_WATCH=0`. Its dirty bitmap is sized for the first 4 GiB, and `A64_MARK` intentionally indexes with 32-bit guest addresses. This is a separate 4 GiB write-watch design, not the 39-bit host pointer conversion. PS5 build integration must decide whether to disable this path or redesign it before GPU write tracking is enabled.
 - `hos_mem.c`'s `pages_used` bitmap is also deliberately limited to the first 4 GiB; the allocation-pages path has a separate above-4-GiB branch that commits without using that bitmap. Do not expand this bitmap to 512 GiB without evaluating its memory cost and the existing zero-on-new-pages behavior.
 
-## Console-probe result: the current 16 TiB guest base is not reservable
-
-The pinned SDK's `platform/docs/PROBE.md` records measured console behavior (PS5 system software 12.09, inside the RetroArch title process):
-
-- `sceKernelReserveVirtualRange` grants a 16 GiB reservation at the hint `0x10_0000_0000` (64 GiB) and supports ranges below `0x80_0000_0000` (512 GiB).
-- The probe reports that nothing at or above `0x100_0000_0000` (1 TiB) is granted.
-- It explicitly includes `0x100_0000_0000` (1 TiB), `0x400_0000_0000` (4 TiB), and `0x100_0000_0000_0`? No: the actual 16 TiB hint is `0x100_0000_0000_0` only if written with an extra zero; ReLink's current `A64_HOST_BASE = 0x100000000000` is 16 TiB and is outside the measured reservable range.
-
-Therefore the current fixed `A64_HOST_BASE = 0x100000000000` cannot be used on the measured PS5 environment. This is a hard blocker, not a missing implementation detail. The 512 GiB guest window also cannot simply be shifted to 64 GiB based on this evidence: the measured free reservation span from 64 GiB to 512 GiB is only 448 GiB, and ReLink needs 512 GiB. A smaller window or different guest address model would require a full compatibility audit of the image layout, heap, address regions, generated code and GPU import ranges.
-
-## What the same probe does establish about first-touch faults
-
-The SDK's `probe_faults()` test proves that a reserved, unmapped page read raises SIGSEGV with the correct fault address, and that the handler can inspect the machine context, patch the faulting instruction through an alias mapping, and return so the instruction stream continues. It ran 200 fault sites and reported approximately 57 microseconds per fault.
-
-This proves recoverable signal delivery and usable register context in the tested title. It does **not** prove that calling `sceKernelAllocateDirectMemory`, `sceKernelMapDirectMemory`, or `sceKernelMprotect` from inside the signal handler is safe or permitted. A separate probe must test the actual reserve → allocate → fixed-map recovery from the fault handler, including concurrent faults to the same 64 KiB unit, before ReLink can adopt this first-touch design.
-
-## Required architectural decision
-
-Do not implement a PS5 allocator around the current 16 TiB base. First select a guest-memory layout the PS5 kernel can reserve in the presence of the RADV GPU window and the title's other mappings. The SDK's console evidence shows the existing base is outside the usable address space. Keep the PS5 build guard enabled until this layout and the signal-driven mapping behavior are proven.
-
 ## Decision
 
 Do not add a speculative `hos_mem_ps5.c` yet. The SDK provides enough primitives to design a direct-memory-backed arena, but the exact 512 GiB reservation, overlapping-commit bookkeeping, zeroing/decommit rules, and GPU-visible mapping/import contract must be established first. The PS5 build guard remains correct until these are implemented together.
