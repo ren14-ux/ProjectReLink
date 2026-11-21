@@ -35,6 +35,13 @@
     VKX_WIN32_SURFACE(X)                                                                                              \
     X(vkDestroySurfaceKHR)                                                                                            \
     X(vkGetPhysicalDeviceSurfaceSupportKHR)                                                                           \
+#if defined(RELINK_PS5_RADV)
+    X(vkGetPhysicalDeviceDisplayPropertiesKHR)                                                                        \
+    X(vkGetPhysicalDeviceDisplayPlanePropertiesKHR)                                                                   \
+    X(vkGetDisplayPlaneSupportedDisplaysKHR)                                                                          \
+    X(vkGetDisplayModePropertiesKHR)                                                                                  \
+    X(vkCreateDisplayPlaneSurfaceKHR)                                                                                 \
+#endif
     X(vkGetPhysicalDeviceSurfaceCapabilitiesKHR)                                                                      \
     X(vkGetPhysicalDeviceSurfaceFormatsKHR)                                                                           \
     X(vkGetPhysicalDeviceSurfacePresentModesKHR)                                                                      \

@@ -185,7 +185,10 @@ bool create_instance() {
         logf("vk: the Vulkan loader is %u.%u: 1.3 is needed", VK_VERSION_MAJOR(version), VK_VERSION_MINOR(version));
         return false;
     }
-#ifdef _WIN32
+#if defined(RELINK_PS5_RADV)
+    const char* exts[] = {VK_KHR_SURFACE_EXTENSION_NAME, VK_KHR_DISPLAY_EXTENSION_NAME};
+    const uint32_t n_exts = 2;
+#elif defined(_WIN32)
     const char* exts[] = {VK_KHR_SURFACE_EXTENSION_NAME, VK_KHR_WIN32_SURFACE_EXTENSION_NAME};
     const uint32_t n_exts = 2;
 #else
@@ -770,7 +773,11 @@ bool create_swapchain(uint32_t width, uint32_t height) {
     // (as on a card or driver with vsync forced. relink: and the "30, smooth" frame rate, whose frames are each held for the
     // same number of refreshes by presenting them again: only FIFO shows every present, one a refresh)
     // (relink: and the Insert menu's V-Sync, for a card whose driver has no mailbox (AMD's on Windows): immediate tears)
+#if defined(RELINK_PS5_RADV)
+    const bool force_fifo = true;  // PS5 display WSI uses FIFO; do not select mailbox/immediate.
+#else
     const bool force_fifo = getenv("RX_VK_FIFO") != nullptr || opts.vsync != 0 || (fps_low_cap() > 0 && !fifo_held_for_startup.load());
+#endif
     if (!force_fifo) {
         for (auto m : modes)
             if (m == VK_PRESENT_MODE_MAILBOX_KHR) mode = m;
@@ -1233,7 +1240,94 @@ static void choose_present_queue() {
     logf("vk: presents on a queue of their own, of compute family %u (RX_VK_PRESENT_QUEUE=0: off)", dev.present_family);
 }
 
+#if defined(RELINK_PS5_RADV)
+static bool create_ps5_display_surface(uint32_t* out_width, uint32_t* out_height) {
+    uint32_t display_count = 0;
+    VkResult r = vkGetPhysicalDeviceDisplayPropertiesKHR(dev.physical, &display_count, nullptr);
+    if (r != VK_SUCCESS || !display_count) {
+        logf("vk: PS5: no Vulkan displays reported (result %d, count %u)", (int)r, display_count);
+        return false;
+    }
+    std::vector<VkDisplayPropertiesKHR> displays(display_count);
+    r = vkGetPhysicalDeviceDisplayPropertiesKHR(dev.physical, &display_count, displays.data());
+    if (r != VK_SUCCESS || !display_count) return false;
+    const VkDisplayKHR display = displays[0].display;
+
+    uint32_t plane_count = 0;
+    r = vkGetPhysicalDeviceDisplayPlanePropertiesKHR(dev.physical, &plane_count, nullptr);
+    if (r != VK_SUCCESS || !plane_count) {
+        logf("vk: PS5: no Vulkan display planes reported (result %d, count %u)", (int)r, plane_count);
+        return false;
+    }
+    std::vector<VkDisplayPlanePropertiesKHR> planes(plane_count);
+    r = vkGetPhysicalDeviceDisplayPlanePropertiesKHR(dev.physical, &plane_count, planes.data());
+    if (r != VK_SUCCESS) return false;
+
+    uint32_t selected_plane = UINT32_MAX;
+    for (uint32_t i = 0; i < plane_count; ++i) {
+        uint32_t supported_count = 0;
+        r = vkGetDisplayPlaneSupportedDisplaysKHR(dev.physical, i, &supported_count, nullptr);
+        if (r != VK_SUCCESS || !supported_count) continue;
+        std::vector<VkDisplayKHR> supported(supported_count);
+        r = vkGetDisplayPlaneSupportedDisplaysKHR(dev.physical, i, &supported_count, supported.data());
+        if (r != VK_SUCCESS) continue;
+        for (VkDisplayKHR candidate : supported)
+            if (candidate == display) { selected_plane = i; break; }
+        if (selected_plane != UINT32_MAX) break;
+    }
+    if (selected_plane == UINT32_MAX) {
+        logf("vk: PS5: no display plane supports the primary display");
+        return false;
+    }
+
+    uint32_t mode_count = 0;
+    r = vkGetDisplayModePropertiesKHR(dev.physical, display, &mode_count, nullptr);
+    if (r != VK_SUCCESS || !mode_count) {
+        logf("vk: PS5: no display modes reported (result %d, count %u)", (int)r, mode_count);
+        return false;
+    }
+    std::vector<VkDisplayModePropertiesKHR> modes(mode_count);
+    r = vkGetDisplayModePropertiesKHR(dev.physical, display, &mode_count, modes.data());
+    if (r != VK_SUCCESS) return false;
+    uint32_t selected_mode = 0;
+    for (uint32_t i = 0; i < mode_count; ++i) {
+        const VkExtent2D e = modes[i].parameters.visibleRegion;
+        if (e.width == 1920 && e.height == 1080) { selected_mode = i; break; }
+    }
+    const VkDisplayModeParametersKHR mode = modes[selected_mode].parameters;
+    if (!mode.visibleRegion.width || !mode.visibleRegion.height) return false;
+
+    VkDisplayPlaneCapabilitiesKHR plane_caps{};
+    r = vkGetDisplayPlaneCapabilitiesKHR(dev.physical, modes[selected_mode].displayMode, selected_plane,
+                                         planes[selected_plane].currentStackIndex, &plane_caps);
+    if (r != VK_SUCCESS) {
+        logf("vk: PS5: querying display-plane capabilities failed (%d)", (int)r);
+        return false;
+    }
+    VkDisplaySurfaceCreateInfoKHR si{VK_STRUCTURE_TYPE_DISPLAY_SURFACE_CREATE_INFO_KHR};
+    si.displayMode = modes[selected_mode].displayMode;
+    si.planeIndex = selected_plane;
+    si.planeStackIndex = planes[selected_plane].currentStackIndex;
+    si.transform = plane_caps.supportedTransforms & VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR
+                       ? VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR : plane_caps.currentTransform;
+    si.globalAlpha = 1.0f;
+    si.alphaMode = plane_caps.supportedAlpha & VK_DISPLAY_PLANE_ALPHA_OPAQUE_BIT_KHR
+                       ? VK_DISPLAY_PLANE_ALPHA_OPAQUE_BIT_KHR : VK_DISPLAY_PLANE_ALPHA_GLOBAL_BIT_KHR;
+    si.imageExtent = mode.visibleRegion;
+    r = vkCreateDisplayPlaneSurfaceKHR(dev.instance, &si, nullptr, &dev.surface);
+    if (r != VK_SUCCESS) {
+        logf("vk: PS5: vkCreateDisplayPlaneSurfaceKHR failed (%d)", (int)r);
+        return false;
+    }
+    *out_width = mode.visibleRegion.width;
+    *out_height = mode.visibleRegion.height;
+    logf("vk: PS5: selected display mode %ux%u at %u mHz", *out_width, *out_height, mode.refreshRate);
+    return true;
+}
+#endif
+
 int start(void* hwnd) {
+#if !defined(RELINK_PS5_RADV)
     main_window = (HWND)hwnd;
     if (!hwnd) {   // (HOS_HEADLESS: no window; the frames are rendered all the same, RX_VK_SHOTS writes them out)
         dev.offscreen = true;
@@ -1242,7 +1336,23 @@ int start(void* hwnd) {
         logf("vk: no window: presents render offscreen (%ux%u)", dev.swap_extent.width, dev.swap_extent.height);
         return started_up() ? 1 : 0;
     }
-#ifdef _WIN32
+#endif
+#if defined(RELINK_PS5_RADV)
+    uint32_t width = 0, height = 0;
+    if (!create_ps5_display_surface(&width, &height)) return 0;
+    VkBool32 ok = VK_FALSE;
+    VkResult present = vkGetPhysicalDeviceSurfaceSupportKHR(dev.physical, dev.queue_family, dev.surface, &ok);
+    if (present != VK_SUCCESS || !ok) {
+        logf("vk: PS5: graphics queue cannot present to the selected display (result %d, supported %u)",
+             (int)present, ok);
+        return 0;
+    }
+    choose_present_queue();
+    if (!create_swapchain(width, height)) {
+        logf("vk: PS5: swapchain creation failed for display mode %ux%u", width, height);
+        return 0;
+    }
+#elif defined(_WIN32)
     VkWin32SurfaceCreateInfoKHR si{VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR};
     si.hinstance = GetModuleHandleA(nullptr);
     si.hwnd = (HWND)hwnd;
