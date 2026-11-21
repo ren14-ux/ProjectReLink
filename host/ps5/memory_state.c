@@ -145,7 +145,7 @@ Ps5MemResult ps5_mem_state_reindex(Ps5MemState *state, Ps5MemExtent *storage,
     size_t i, count = 0, free_hint = SIZE_MAX;
     if (!state || !storage || !index || !capacity ||
         capacity > SIZE_MAX / sizeof(*storage) || capacity > UINT32_MAX ||
-        index_capacity < capacity * 2 || (index_capacity & (index_capacity - 1)) ||
+        capacity > SIZE_MAX / 2 || index_capacity < capacity * 2 || (index_capacity & (index_capacity - 1)) ||
         index_capacity > SIZE_MAX / sizeof(*index))
         return PS5_MEM_INVALID;
     memset(index, 0, index_capacity * sizeof(*index));
