@@ -145,3 +145,22 @@ A PS5 page table cannot be represented as a simple 4 KiB bitmap. The implementat
 The existing `ps5_shm` wrapper is useful as a source of fixed-map mechanics, but its global direct-memory allocation model and CPU-only protections should not be wired into `hos_commit()` unchanged. The next safe implementation step is to settle a bounded arena layout and ownership table, then validate whether the required kernel map/protect calls are callable from the first-touch handler. Until then, no speculative PS5 allocator is added and the PS5 build guard remains in place.
 
 No compilation, first-touch mapping probe, or console test was performed for this follow-up.
+
+## Address-layout calculation: what a lower-base candidate must cover
+
+The guest address space is a 39-bit offset space, not a 512 GiB host-address base. The current map uses these guest offsets:
+
+- System objects: 16 MiB through 112 MiB.
+- Main image and SDK modules: beginning around 2 GiB, ending at the generated `hos_image_end`.
+- Heap: begins at 64 GiB (`HOS_HEAP_BASE = 0x1000000000`).
+- Address regions: allocated downward from the 512 GiB guest-space ceiling (`HOS_SPACE_END = 0x8000000000`).
+
+For any candidate host base `B`, the complete reservation must therefore cover the half-open interval `[B, B + 512 GiB)`; guest offset `x` must continue to resolve to `B + x`. Moving the base does not change any guest offsets, image addresses, heap offsets, or generated guest addresses. It changes only the host virtual address at which the flat guest window is mapped.
+
+The existing probe's 64 GiB success is evidence for a 16 GiB reservation at that hint, not for the full 512 GiB interval. A 64 GiB base would place the end of the required window at 576 GiB, below the observed 1 TiB refusal threshold, making it a reasonable *candidate to investigate* but not a validated choice. Do not set it as the production base until the complete 512 GiB range is proven available on the target environment.
+
+### Consequence for the implementation
+
+The current source already makes the base overrideable with the `A64_HOST_BASE` compile-time definition in `third_party/a64-kit/rt/a64.h`. That is the correct mechanism for a PS5-specific address choice: the PS5 build should provide one consistent value to every translation unit that includes the runtime header, while desktop defaults remain unchanged. `reserve_guest()` must still reserve exactly that base and the entire 512 GiB window, and startup must fail rather than accept a relocated result.
+
+The base change alone does not solve backing memory. The separate allocator/fault/decommit/GPU-import lifetime work remains required. No production base is selected in this audit, and no console probe or test was run.
