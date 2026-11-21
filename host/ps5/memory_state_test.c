@@ -255,6 +255,27 @@ static void test_extent_index_stays_sorted(void) {
     assert(storage[1].guest_base == 0x300000);
 }
 
+
+static void test_indexed_extent_state_reuses_slots(void) {
+    Ps5MemState state;
+    Ps5MemExtent storage[4];
+    Ps5MemIndexEntry index[8];
+    uint64_t handle = 0;
+
+    assert(ps5_mem_state_init_indexed(&state, storage, 4, index, 8) == PS5_MEM_OK);
+    assert(ps5_mem_extent_add_trusted(&state, 0x300000, 3) == PS5_MEM_OK);
+    assert(ps5_mem_extent_add_trusted(&state, 0x100000, 1) == PS5_MEM_OK);
+    assert(ps5_mem_extent_add_trusted(&state, 0x200000, 2) == PS5_MEM_OK);
+    assert(ps5_mem_extent_get_handle(&state, 0x200000, &handle) == PS5_MEM_OK);
+    assert(handle == 2);
+    assert(ps5_mem_extent_retire(&state, 0x200000) == PS5_MEM_OK);
+    assert(ps5_mem_extent_forget(&state, 0x200000, &handle) == PS5_MEM_OK);
+    assert(state.count == 2);
+    assert(ps5_mem_extent_add_trusted(&state, 0x400000, 4) == PS5_MEM_OK);
+    assert(ps5_mem_extent_get_handle(&state, 0x400000, &handle) == PS5_MEM_OK);
+    assert(handle == 4);
+}
+
 int main(void) {
     test_extent_lifecycle();
     test_atomic_range_validation();
@@ -265,5 +286,6 @@ int main(void) {
     test_guest_page_ownership_and_import_lifetime();
     test_page_claim_range_is_atomic();
     test_extent_index_stays_sorted();
+    test_indexed_extent_state_reuses_slots();
     return 0;
 }
