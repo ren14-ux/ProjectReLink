@@ -165,12 +165,15 @@ static void test_guest_page_ownership_and_import_lifetime(void) {
     const uint64_t page = base + 0x1000;
     uint8_t views = 0;
     uint16_t pending = 0;
+    uint8_t reserved = 0, mapped = 0, gpu = 0;
+    uint32_t imports[PS5_MEM_VIEWS_PER_EXTENT] = {0};
 
     assert(ps5_mem_state_init(&state, storage, 1) == PS5_MEM_OK);
     assert(ps5_mem_extent_add(&state, base, 41) == PS5_MEM_OK);
 
     /* A 4 KiB page is tracked separately from its 16 KiB mapping view. */
     assert(ps5_mem_pages_claim(&state, page, 0x1000) == PS5_MEM_OK);
+    assert(ps5_mem_pages_claim_missing(&state, page, 0x1000) == PS5_MEM_OK);
     assert(ps5_mem_pages_allocated_views(&state, base, &views) == PS5_MEM_OK);
     assert(views == 1);
     assert(ps5_mem_pages_zero_pending(&state, base, &pending) == PS5_MEM_OK);
@@ -180,12 +183,16 @@ static void test_guest_page_ownership_and_import_lifetime(void) {
     assert(ps5_mem_pages_mark_zeroed(&state, page, 0x1000) == PS5_MEM_STATE);
     assert(ps5_mem_view_reserved(&state, base) == PS5_MEM_OK);
     assert(ps5_mem_view_mapped(&state, base) == PS5_MEM_OK);
+    assert(ps5_mem_extent_view_state(&state, base, &reserved, &mapped, &gpu, imports) == PS5_MEM_OK);
+    assert(reserved == 0 && mapped == 1 && gpu == 0 && imports[0] == 0);
     assert(ps5_mem_pages_mark_zeroed(&state, page, 0x1000) == PS5_MEM_OK);
     assert(ps5_mem_pages_zero_pending(&state, base, &pending) == PS5_MEM_OK);
     assert(pending == 0);
 
     assert(ps5_mem_view_gpu_granted(&state, base) == PS5_MEM_OK);
     assert(ps5_mem_import_acquire(&state, base, PS5_MEM_VIEW_SIZE) == PS5_MEM_OK);
+    assert(ps5_mem_extent_view_state(&state, base, &reserved, &mapped, &gpu, imports) == PS5_MEM_OK);
+    assert(mapped == 1 && gpu == 1 && imports[0] == 1);
     /* A live import prevents ownership changes to any 4 KiB subpage in its view. */
     assert(ps5_mem_pages_claim(&state, base, 0x1000) == PS5_MEM_BUSY);
     assert(ps5_mem_pages_free(&state, page, 0x1000) == PS5_MEM_BUSY);
