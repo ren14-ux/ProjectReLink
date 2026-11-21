@@ -20,7 +20,9 @@ typedef struct Ps5MemoryService {
     Ps5SdkExtentPool pool;
     Ps5MemExtent *extents;
     Ps5SdkExtentSlot *slots;
+    Ps5MemIndexEntry *index;
     size_t capacity;
+    size_t index_capacity;
     uintptr_t guest_base;
     size_t guest_bytes;
     int initialized;
@@ -46,32 +48,43 @@ static uint64_t absolute_address(uint64_t offset) {
 }
 
 static int grow_storage(void) {
-    size_t next;
+    size_t next, next_index_capacity;
     Ps5MemExtent *extents;
     Ps5SdkExtentSlot *slots;
+    Ps5MemIndexEntry *index;
     if (service.capacity >= PS5_MEMORY_MAX_EXTENTS) return 0;
     next = service.capacity > PS5_MEMORY_MAX_EXTENTS / 2
                ? PS5_MEMORY_MAX_EXTENTS : service.capacity * 2;
     if (next <= service.capacity || next > SIZE_MAX / sizeof(*extents) ||
-        next > SIZE_MAX / sizeof(*slots)) return 0;
+        next > SIZE_MAX / sizeof(*slots) || next > SIZE_MAX / 2)
+        return 0;
+    next_index_capacity = next * 2;
+    if (next_index_capacity > SIZE_MAX / sizeof(*index)) return 0;
     extents = (Ps5MemExtent *)calloc(next, sizeof(*extents));
     slots = (Ps5SdkExtentSlot *)calloc(next, sizeof(*slots));
-    if (!extents || !slots) {
+    index = (Ps5MemIndexEntry *)calloc(next_index_capacity, sizeof(*index));
+    if (!extents || !slots || !index) {
         free(extents);
         free(slots);
+        free(index);
         return 0;
     }
-    if (service.state.count)
-        memcpy(extents, service.extents, service.state.count * sizeof(*extents));
-    if (service.pool.count)
-        memcpy(slots, service.slots, service.pool.capacity * sizeof(*slots));
+    memcpy(extents, service.extents, service.capacity * sizeof(*extents));
+    memcpy(slots, service.slots, service.pool.capacity * sizeof(*slots));
+    if (ps5_mem_state_reindex(&service.state, extents, next, index, next_index_capacity) != PS5_MEM_OK) {
+        free(extents);
+        free(slots);
+        free(index);
+        return 0;
+    }
     free(service.extents);
     free(service.slots);
+    free(service.index);
     service.extents = extents;
     service.slots = slots;
+    service.index = index;
     service.capacity = next;
-    service.state.extents = extents;
-    service.state.capacity = next;
+    service.index_capacity = next_index_capacity;
     service.pool.slots = slots;
     service.pool.capacity = next;
     return 1;
@@ -276,11 +289,14 @@ int ps5_memory_init(const Ps5GuestWindow *window) {
         return -1;
     }
     service.capacity = PS5_MEMORY_INITIAL_EXTENTS;
+    service.index_capacity = service.capacity * 2;
     service.extents = (Ps5MemExtent *)calloc(service.capacity, sizeof(*service.extents));
     service.slots = (Ps5SdkExtentSlot *)calloc(service.capacity, sizeof(*service.slots));
-    if (!service.extents || !service.slots) goto fail;
+    service.index = (Ps5MemIndexEntry *)calloc(service.index_capacity, sizeof(*service.index));
+    if (!service.extents || !service.slots || !service.index) goto fail;
 
-    mr = ps5_mem_state_init(&service.state, service.extents, service.capacity);
+    mr = ps5_mem_state_init_indexed(&service.state, service.extents, service.capacity,
+                                    service.index, service.index_capacity);
     if (mr != PS5_MEM_OK) goto fail;
     sr = ps5_sdk_extent_pool_init(&service.pool, service.slots, service.capacity);
     if (sr != PS5_SDK_EXTENT_OK) goto fail;
@@ -296,6 +312,7 @@ int ps5_memory_init(const Ps5GuestWindow *window) {
 fail:
     free(service.extents);
     free(service.slots);
+    free(service.index);
     memset(&service, 0, sizeof(service));
     pthread_mutex_unlock(&memory_mutex);
     return -1;
@@ -375,8 +392,15 @@ int ps5_memory_shutdown(void) {
     }
     while (service.state.count) {
         const size_t count_before = service.state.count;
-        const uint64_t guest_extent = service.state.extents[0].guest_base;
+        size_t slot = 0;
+        uint64_t guest_extent;
         uint16_t allocated = 0;
+        while (slot < service.capacity && !service.state.extents[slot].occupied) ++slot;
+        if (slot == service.capacity) {
+            r = PS5_MEM_STATE;
+            break;
+        }
+        guest_extent = service.state.extents[slot].guest_base;
         unsigned page;
         r = ps5_mem_pages_allocated_mask(&service.state, guest_extent, &allocated);
         if (r != PS5_MEM_OK) break;
@@ -401,6 +425,7 @@ int ps5_memory_shutdown(void) {
     }
     free(service.extents);
     free(service.slots);
+    free(service.index);
     memset(&service, 0, sizeof(service));
     pthread_mutex_unlock(&memory_mutex);
     return 0;
