@@ -46,7 +46,11 @@ typedef enum Ps5MemResult {
     PS5_MEM_OVERFLOW = -6
 } Ps5MemResult;
 
-/* Storage must remain alive for the lifetime of the state object. */
+/*
+ * Storage must remain alive for the lifetime of the state object. All calls
+ * for a state object must be externally serialized by the backend's memory
+ * lock; this module deliberately contains no platform lock.
+ */
 Ps5MemResult ps5_mem_state_init(Ps5MemState *state, Ps5MemExtent *storage, size_t capacity);
 
 /* Register a successfully allocated 64 KiB physical extent. */
@@ -67,6 +71,10 @@ Ps5MemResult ps5_mem_extent_retire(Ps5MemState *state, uint64_t guest_base);
 
 /* True only when the SDK backing may be released: no mappings, grants, or imports remain. */
 int ps5_mem_extent_release_ready(const Ps5MemState *state, uint64_t guest_base);
+
+/* Read the opaque handle while the extent is still registered. */
+Ps5MemResult ps5_mem_extent_get_handle(const Ps5MemState *state, uint64_t guest_base,
+                                       uint64_t *backing_handle_out);
 
 /* Remove metadata only after the caller successfully releases the SDK backing handle. */
 Ps5MemResult ps5_mem_extent_forget(Ps5MemState *state, uint64_t guest_base, uint64_t *backing_handle_out);
