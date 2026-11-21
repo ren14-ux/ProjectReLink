@@ -28,17 +28,16 @@ This seam is small in isolation, but it cannot be enabled until the PS5 executab
 
 ### 2. Vulkan global dispatch: `gpu/vk/vk_main.cpp`
 
-The PS5 RADV reference exports `vk_icdGetInstanceProcAddr` from the linked driver. The existing `RELINK_PS5_RADV` guarded loader path now uses that entry point instead of `LoadLibraryA`/desktop loader discovery.
-
-That change only initializes global Vulkan dispatch. It does not create a display surface or make the current renderer start on PS5.
+The PS5 RADV reference exports `vk_icdGetInstanceProcAddr` from the linked driver. The existing `RELINK_PS5_RADV` guarded loader path now uses that entry point instead of `LoadLibraryA`/desktop loader discovery. This initializes global dispatch; it is not sufficient on its own to start the renderer.
 
 ### 3. Presentation: `gpu/vk/vk_main.cpp` and `gpu/vk/vk_loader.h`
 
-Current `start()` has two paths:
+Current `start()` has three paths:
 - Win32 surface creation on Windows.
-- An SDL-provided `MkwVkWindow` surface on non-Windows builds.
+- An SDL-provided `MkwVkWindow` surface on desktop non-Windows builds.
+- A guarded `RELINK_PS5_RADV` path that enumerates display properties, planes and modes; chooses 1920x1080 when available (otherwise the smallest reported mode); creates a `VK_KHR_display` surface; verifies present support on the graphics queue; and creates the swapchain.
 
-The PS5 path needs its own surface/presentation implementation matching the RADV build's PS5 WSI, including the required display extensions and the platform's VideoOut integration. The exact implementation must follow the pinned RADV/SDK headers and the reference title; do not invent Vulkan structure fields or copy a desktop swapchain path.
+The PS5 path forces FIFO presentation and checks the display WSI function pointers, identity transform support, and supported alpha modes. This is source-level integration only: it has not been compiled against the pinned SDK/RADV headers or run on hardware. Failure cleanup and queue-family fallback still need review.
 
 ### 4. Host startup and platform services
 
@@ -95,19 +94,22 @@ The upstream recipe expects a host Clang resource archive at `lib/linux/libclang
 
 The reference build script builds Mesa from the pinned source archive using the PS5 cross file and emits a provenance file recording the Mesa revision, SDK revision, assertion mode, and archive SHA-256. ReLink should preserve that provenance and use the release (assertions-off) archive for a game build; the debug archive is intended for driver development and CTS work.
 
-**Important scope boundary:** this pins the RADV source dependency, not a completed ReLink build. ReLink still needs a dedicated PS5 build target, static renderer linkage (including `mkwvk_init`, `mkwvk_close_asked`, and `relink_program_set`), PS5 host/platform services, and the VideoOut `VK_KHR_display` presentation path. The current renderer's non-Windows startup still expects an SDL window bridge, so the direct RADV entry point alone cannot present a frame on PS5.
+**Important scope boundary:** this pins the RADV source dependency, not a completed ReLink build. ReLink still needs a dedicated PS5 build target, static renderer linkage (including `mkwvk_init`, `mkwvk_close_asked`, and `relink_program_set`), and PS5 host/platform services. The Vulkan display-surface path has been added behind `RELINK_PS5_RADV`, but remains uncompiled and untested.
 
 
 ## Verified PS5 display/WSI contract
 
 The PS5 homebrew reference documents the concrete RADV display path. VideoOut integration belongs to the PS5 RADV winsys; ReLink must not open VideoOut independently while this Vulkan WSI owns the display.
 
-1. Enable both `VK_KHR_surface` and `VK_KHR_display` at instance creation. The current ReLink instance extension list does not yet enable these PS5 display extensions.
-2. Query `vkGetPhysicalDeviceDisplayPropertiesKHR` and `vkGetDisplayModePropertiesKHR`. The console exposes one display and a finite set of modes. Do not assume 4K is always the best target: 1920x1080 and 2560x1440 are practical lower-pixel-count modes, with 3840x2160 also available.
-3. Create the surface with `vkCreateDisplayPlaneSurfaceKHR`, using the selected mode's visible region, identity transform and opaque alpha. The swapchain extent must match the selected display mode; VideoOut performs screen scaling.
-4. Select a graphics-capable queue family and verify it with `vkGetPhysicalDeviceSurfaceSupportKHR`. Use FIFO presentation and at least three swapchain images, subject to surface capabilities and supported formats.
-5. Keep display ownership in Vulkan WSI. Do not mix this path with a second direct VideoOut buffer/flip loop.
+1. Enable `VK_KHR_surface` and `VK_KHR_display` at instance creation. The PS5 branch now does this.
+2. Query display properties, planes, supported displays and modes. The current implementation selects the first reported display, a compatible plane, prefers 1920x1080, and otherwise selects the smallest nonzero mode.
+3. Create the surface with `vkCreateDisplayPlaneSurfaceKHR`, identity transform and an alpha mode supported by the selected plane. The swapchain uses the selected mode's visible region.
+4. Verify that the graphics queue supports presentation, then use FIFO. The swapchain requests at least three images when the caps permit, but its existing general logic may request four in other configurations.
+5. Keep display ownership in Vulkan WSI; do not mix this path with a second direct VideoOut buffer/flip loop.
 
-Implementation consequence: add a dedicated `RELINK_PS5_RADV` instance-extension branch and a PS5 start path that creates the display surface before the existing queue/swapchain setup. The present path should continue using ordinary Vulkan swapchain acquire/submit/present. The current `start()` interprets a non-Windows argument as `MkwVkWindow`; passing a null or opaque PS5 value through that branch is invalid. The PS5 branch must bypass SDL bridge dereferences and derive its extent from the chosen display mode.
+The implementation bypasses the SDL window bridge in `start()` and continues through the existing Vulkan swapchain acquire/submit/present path. Remaining work includes robust present-queue family selection and cleanup on partial startup failure. This is not a compile or console validation claim.
 
-This is a verified integration contract from the PS5 RADV/template documentation, not an implementation claim. The repository still needs the actual PS5 WSI branch, build target and host port before a console build can be attempted.
+
+## Latest source correction
+
+The PS5 display functions are part of the `VKX_INSTANCE` dispatch macro in `gpu/vk/vk_loader.h`. The display-surface entry was missing a trailing macro continuation, which detached the subsequent surface-query functions from the macro and could break compilation. The continuation has been restored. This is a source inspection fix; no PS5 compile has been run.

@@ -40,7 +40,7 @@
     X(vkGetDisplayPlaneSupportedDisplaysKHR)                                                                          \
     X(vkGetDisplayModePropertiesKHR)                                                                                  \
     X(vkGetDisplayPlaneCapabilitiesKHR)                                                                               \
-    X(vkCreateDisplayPlaneSurfaceKHR)
+    X(vkCreateDisplayPlaneSurfaceKHR)                                                                                  \
     X(vkGetPhysicalDeviceSurfaceCapabilitiesKHR)                                                                      \
     X(vkGetPhysicalDeviceSurfaceFormatsKHR)                                                                           \
     X(vkGetPhysicalDeviceSurfacePresentModesKHR)                                                                      \
