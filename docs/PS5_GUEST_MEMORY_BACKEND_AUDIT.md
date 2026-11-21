@@ -387,17 +387,21 @@ The PS5 workflow now runs its guest-window diagnostic job when any `host/ps5/**`
 
 ## Memory-phase completion gate remains closed
 
-Despite the improved coordinator, the production memory phase is not complete. The current branch still has no `host/ps5/memory.c` service and does not initialize/bind the extent pool during title startup. `hos_mem.c` still uses the desktop allocator/discard paths; the PS5 branch in `vk_memory.cpp` only documents that guest pages must already be committed. The Vulkan import lifetime wrappers are not called from the real import/retirement path.
+The explicit page service and the principal allocator/renderer hooks now exist in source:
 
-The remaining blocking work is therefore concrete:
+1. `host/ps5/memory.c/.h` initializes after the exact guest window is reserved, binds the extent pool to that parent reservation, grows metadata storage, allocates 64 KiB direct-memory extents, maps the required 16 KiB views, zeroes pending 4 KiB pages, and tracks deferred frees while imports are live.
+2. `hos_mem.c` routes PS5 `AllocateMemoryPages`, `FreeMemoryPages`, region discard, and released-region gaps through that service. `hos_commit` is supplied by the PS5 service.
+3. `gpu/vk/vk_memory.cpp` acquires service import holds around actual pool imports. Holds move with pools into retired/evicted/dead-import queues and are released only after the renderer's `mem_completed` value permits destroying the Vulkan import.
+4. The native dirty-page bitmap and indices now cover the full 512 GiB guest window.
 
-1. Implement and initialize a PS5 page service that allocates extents, maps required views, zeroes newly claimed pages, decommits safe ranges, and retries partial kernel failures.
-2. Replace the Windows first-touch/commit assumptions with a PS5 fault/commit strategy whose signal/exception safety is established. Do not call allocation, locks, or unverified kernel operations from a fault handler.
-3. Connect `AllocateMemoryPages` / `FreeMemoryPages` and `hos_commit` to the service, including full guest-address width and dirty-page tracking.
-4. Connect the service's GPU permission/import holds to the actual RADV import path and release holds only after the renderer's completed timeline value permits destroying each import.
-5. Add the PS5 source groups and startup/shutdown lifecycle to the real title build, then validate the 512 GiB reservation, direct-memory mapping, protection transitions, fault handling, and GPU import retirement on the target console.
+The production memory phase is still not complete:
 
-The diagnostic workflow and source changes do not close these gates. No build, test, or console validation is claimed.
+- There is no PS5 fault-driven first-touch handler. The desktop fallback in `mkw_glue.c` is Windows-specific. Pages not explicitly committed by the HOS allocation path can still fault, and the safety of kernel mapping calls from a fault handler has not been established.
+- The dedicated PS5 title build is still fail-closed. `nx2/ps5_build.py` explicitly reports that PS5 compile groups, in-process RADV objects, SDK link inputs, and title packaging are not integrated. The diagnostic workflow does not compile or link the full game service.
+- The memory service's initialization is wired to guest-window startup, but a verified renderer-first shutdown sequence that drains imports and calls `ps5_memory_shutdown()` is not yet integrated.
+- The 512 GiB address reservation, direct-memory allocation, fixed-view map/unmap restoration, CPU/GPU protection transitions, and import retirement have not been compiled or exercised on the target console.
+
+Remaining gates: implement a validated PS5 first-touch/fault strategy; integrate all PS5 service and RADV sources into the real title build; add renderer-idle then memory-service shutdown ordering; and validate the complete path on console. No build, test, or console validation is claimed.
 
 
 ## Follow-up: native dirty-page bitmap width
