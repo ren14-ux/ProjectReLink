@@ -214,7 +214,7 @@ Ps5MemResult ps5_mem_pages_free(Ps5MemState *state, uint64_t guest_address, uint
         Ps5MemExtent *e = find_extent(state, base);
         const uint16_t bit = (uint16_t)(UINT16_C(1) << page);
         e->allocated_pages &= (uint16_t)~bit;
-        e->zero_pending |= bit;
+        e->zero_pending &= (uint16_t)~bit;
     }
     return PS5_MEM_OK;
 }
