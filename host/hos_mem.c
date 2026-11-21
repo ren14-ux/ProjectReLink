@@ -1,5 +1,5 @@
 /* Guest memory map: the system region (our own objects), the heap, address regions.
-   The whole 4 GB window is committed up front (hos_main.c), so "mapping" here is only bookkeeping and zeroing. */
+   The desktop whole-window reservation is made in hos_main.c; "mapping" here is bookkeeping and zeroing. */
 #include "hos.h"
 #include "hos_mapped_pages.h"
 #include <stdio.h>

@@ -49,7 +49,7 @@ typedef GuestContext Ctx;
 #define A64_INLINE static inline __attribute__((always_inline))
 #endif
 
-/* Guest memory: the 4 GB guest window starts at a constant host address, so the base folds into every access
+/* Guest memory: the 39-bit HOS guest window starts at a constant host address, so the base folds into every access
    instead of being reloaded from a global (with -fno-strict-aliasing any guest byte store could have changed
    that global). Natively the window is reserved at A64_HOST_BASE (hos_main.c); with A64_MEM_ZERO (web builds)
    guest address = wasm address, which needs -fno-delete-null-pointer-checks because guest address 0 is real. */
