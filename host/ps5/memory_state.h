@@ -62,6 +62,8 @@ Ps5MemResult ps5_mem_state_init(Ps5MemState *state, Ps5MemExtent *storage, size_
 
 /* Register a successfully allocated 64 KiB physical extent. */
 Ps5MemResult ps5_mem_extent_add(Ps5MemState *state, uint64_t guest_base, uint64_t backing_handle);
+/* For backends whose allocator guarantees globally unique opaque handles. */
+Ps5MemResult ps5_mem_extent_add_trusted(Ps5MemState *state, uint64_t guest_base, uint64_t backing_handle);
 
 /* Reservation is recorded after reserve succeeds; a fixed map consumes it. */
 Ps5MemResult ps5_mem_view_reserved(Ps5MemState *state, uint64_t guest_view);
