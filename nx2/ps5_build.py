@@ -24,6 +24,8 @@ def preflight(root, toolchain):
         "memory.c",      # exact guest reservation, commit/decommit, first-touch policy
         "memory_state.c", # sparse 64 KiB extent / 16 KiB view lifetime bookkeeping
         "memory_state.h",
+        "guest_window.c",  # exact virtual-address reservation and ownership
+        "guest_window.h",
         "thread.c",      # PS5 thread, TLS, wait and synchronization services
         "filesystem.c",  # title RomFS and writable save/cache paths
         "input.c",       # DualSense input and vibration
