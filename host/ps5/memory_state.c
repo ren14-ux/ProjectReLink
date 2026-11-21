@@ -56,7 +56,8 @@ Ps5MemResult ps5_mem_state_init(Ps5MemState *state, Ps5MemExtent *storage, size_
     return PS5_MEM_OK;
 }
 
-Ps5MemResult ps5_mem_extent_add(Ps5MemState *state, uint64_t guest_base, uint64_t backing_handle) {
+static Ps5MemResult extent_add(Ps5MemState *state, uint64_t guest_base,
+                                 uint64_t backing_handle, int check_handle) {
     size_t lo = 0, hi, i;
     if (!state || !state->extents || !state->capacity ||
         (guest_base & (PS5_MEM_EXTENT_SIZE - 1)) ||
@@ -71,9 +72,11 @@ Ps5MemResult ps5_mem_extent_add(Ps5MemState *state, uint64_t guest_base, uint64_
     if (lo < state->count && state->extents[lo].guest_base == guest_base)
         return PS5_MEM_STATE;
     if (state->count == state->capacity) return PS5_MEM_FULL;
-    for (i = 0; i < state->count; ++i) {
-        /* One SDK backing allocation must have exactly one guest owner. */
-        if (state->extents[i].backing_handle == backing_handle) return PS5_MEM_STATE;
+    if (check_handle) {
+        for (i = 0; i < state->count; ++i) {
+            /* One SDK backing allocation must have exactly one guest owner. */
+            if (state->extents[i].backing_handle == backing_handle) return PS5_MEM_STATE;
+        }
     }
     memmove(&state->extents[lo + 1], &state->extents[lo],
             (state->count - lo) * sizeof(*state->extents));
@@ -83,6 +86,14 @@ Ps5MemResult ps5_mem_extent_add(Ps5MemState *state, uint64_t guest_base, uint64_
     state->extents[lo].occupied = 1;
     ++state->count;
     return PS5_MEM_OK;
+}
+
+Ps5MemResult ps5_mem_extent_add(Ps5MemState *state, uint64_t guest_base, uint64_t backing_handle) {
+    return extent_add(state, guest_base, backing_handle, 1);
+}
+
+Ps5MemResult ps5_mem_extent_add_trusted(Ps5MemState *state, uint64_t guest_base, uint64_t backing_handle) {
+    return extent_add(state, guest_base, backing_handle, 0);
 }
 
 Ps5MemResult ps5_mem_view_reserved(Ps5MemState *state, uint64_t guest_view) {
