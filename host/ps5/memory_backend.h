@@ -23,7 +23,7 @@ Ps5MemResult ps5_mem_backend_allocate_extent(Ps5MemState *state,
                                              uint64_t guest_base,
                                              uint64_t *token_out);
 
-/* Kernel reservation first, then publish the matching memory-state transition. */
+/* Adopt a view of the already-reserved guest window, then publish its state transition. */
 Ps5MemResult ps5_mem_backend_reserve_view(Ps5MemState *state, Ps5SdkExtentPool *pool,
                                           uint64_t guest_base, unsigned view_index,
                                           void *address);
