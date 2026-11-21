@@ -19,6 +19,9 @@ extern "C" {
 #define PS5_MEM_VIEW_SIZE   UINT64_C(0x4000)
 #define PS5_MEM_VIEWS_PER_EXTENT 4u
 #define PS5_MEM_NO_HANDLE UINT64_MAX
+#define PS5_MEM_PAGE_SIZE UINT64_C(0x1000)
+#define PS5_MEM_PAGES_PER_EXTENT 16u
+#define PS5_MEM_PAGES_PER_VIEW 4u
 
 typedef struct Ps5MemExtent {
     uint64_t guest_base;       /* 64 KiB aligned absolute guest virtual address */
