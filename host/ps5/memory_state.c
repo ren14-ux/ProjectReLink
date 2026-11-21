@@ -38,7 +38,8 @@ static Ps5MemResult range_validate(uint64_t address, uint64_t bytes, uint64_t *e
 }
 
 Ps5MemResult ps5_mem_state_init(Ps5MemState *state, Ps5MemExtent *storage, size_t capacity) {
-    if (!state || !storage || !capacity) return PS5_MEM_INVALID;
+    if (!state || !storage || !capacity || capacity > SIZE_MAX / sizeof(*storage))
+        return PS5_MEM_INVALID;
     memset(storage, 0, capacity * sizeof(*storage));
     state->extents = storage;
     state->capacity = capacity;
