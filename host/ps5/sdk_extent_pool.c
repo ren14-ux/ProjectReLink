@@ -200,7 +200,9 @@ Ps5SdkExtentResult ps5_sdk_extent_set_gpu_access(Ps5SdkExtentPool *pool, uint64_
         return PS5_SDK_EXTENT_INVALID;
     if (slot->gpu_mask & bit) return PS5_SDK_EXTENT_INVALID;
 
+    /* mprotect replaces the complete protection mask; preserve CPU R/W. */
     result = sceKernelMprotect(slot->views[view_index], PS5_SDK_EXTENT_VIEW_BYTES,
+                               PS5_KERNEL_PROT_CPU_READ | PS5_KERNEL_PROT_CPU_WRITE |
                                protection);
     if (result != 0) return PS5_SDK_EXTENT_KERNEL;
     slot->gpu_mask |= bit;
