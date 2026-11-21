@@ -296,3 +296,13 @@ This is intentionally a bookkeeping primitive, not a memory allocator or kernel 
 - The fixed metadata capacity must be chosen by the future backend and exhaustion must fail closed.
 
 The source is not yet included in a PS5 build source group and no production caller uses it. This creates a testable boundary for the next integration step without implying that PS5 guest memory is operational.
+
+### Host-side state-transition tests
+
+`host/ps5/memory_state_test.c` exercises the metadata API without a PS5 runtime. It covers map/grant/import/retire/release ordering, blocking unmap or GPU revocation while imports remain, atomic validation of multi-view import ranges, overflow/alignment rejection, duplicate extents, and metadata-capacity exhaustion. Run it on a development host with:
+
+```sh
+sh host/ps5/run-memory-state-tests.sh
+```
+
+The runner compiles the C implementation with C11, pedantic warnings, and warnings-as-errors in a temporary directory. It is a host-side unit test only; it does not validate SDK calls, GPU timeline integration, PS5 mapping semantics, or title startup. The PS5 preflight now requires both `memory_state.c` and `memory_state.h` as part of the eventual backend source set, while the actual `memory.c` adapter remains a separate missing prerequisite.
