@@ -171,10 +171,6 @@ Ps5MemResult ps5_mem_view_gpu_revoked(Ps5MemState *state, uint64_t guest_view) {
 }
 
 
-#define PS5_MEM_PAGE_SIZE UINT64_C(0x1000)
-#define PS5_MEM_PAGES_PER_EXTENT 16u
-#define PS5_MEM_PAGES_PER_VIEW 4u
-
 static Ps5MemResult page_range_validate(uint64_t address, uint64_t bytes, uint64_t *end) {
     if (!bytes || (address & (PS5_MEM_PAGE_SIZE - 1)) ||
         (bytes & (PS5_MEM_PAGE_SIZE - 1))) return PS5_MEM_INVALID;
