@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Build a PS5 title folder (PPSA00000), using the native title pipeline.
 set -euo pipefail
-root=$(cd -- "$(dirname -- "\${BASH_SOURCE[0]}")/../.." && pwd)
-vulkan_root=\${PS5_VULKAN_ROOT:-$root/../PS5_Vulkan}
+root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
+vulkan_root=${PS5_VULKAN_ROOT:-$root/../PS5_Vulkan}
 vulkan_revision=$(awk '!/^#/ && NF { print; exit }' "$root/deps/ps5-vulkan-toolchain.commit")
 sdk_revision=$(awk '!/^#/ && NF { print; exit }' "$root/deps/ps5-payload-sdk.commit")
 title_id=PPSA00000
@@ -28,7 +28,10 @@ actual_vulkan_revision=$(git -C "$vulkan_root" rev-parse HEAD)
 [[ -f "$sdk/.ps5-sdk-revision" && "$(tr -d '\r\n' < "$sdk/.ps5-sdk-revision")" == "$sdk_revision" ]] || {
   echo "PS5 SDK revision mismatch; expected $sdk_revision" >&2; exit 2;
 }
-for file in "$wrapper" "$native/app_crt.cpp" "$native/ps5-pie.ld" "$native/app-symbols.map"; do
+linker_script="$vulkan_root/tooling/psbc/ps5-pie-unwind.ld"
+for file in "$wrapper" "$native/app_crt.cpp" "$linker_script" "$native/app-symbols.map" \
+           "$sdk/target/lib/libps5platform.a" "$sdk/target/lib/libc++.a" \
+           "$sdk/target/lib/libc++abi.a" "$sdk/target/lib/libunwind.a"; do
   [[ -f "$file" ]] || { echo "missing native title input: $file" >&2; exit 2; }
 done
 
@@ -59,7 +62,12 @@ PY
 
 shopt -s nullglob
 sdk_stubs=("$sdk"/target/lib/*.so)
-(( \${#sdk_stubs[@]} > 0 )) || { echo "no PS5 SDK import stubs found" >&2; exit 2; }
+(( ${#sdk_stubs[@]} > 0 )) || { echo "no PS5 SDK import stubs found" >&2; exit 2; }
+
+compiler=${PS5_CLANG:-$(command -v clang || command -v clang-18 || true)}
+[[ -n "$compiler" ]] || { echo "clang was not found; set PS5_CLANG" >&2; exit 2; }
+builtins="$("$compiler" --print-resource-dir)/lib/linux/libclang_rt.builtins-x86_64.a"
+[[ -f "$builtins" ]] || { echo "missing Clang x86_64 builtins: $builtins" >&2; exit 2; }
 
 mkdir -p "$work/obj"
 rm -f "$work/obj/"*.o "$work/llvm-pie.elf" "$work/eboot.elf"
@@ -73,11 +81,13 @@ compile -std=c11 -O2 -Wall -Wextra -ffunction-sections -fdata-sections \
 compile -std=c++20 -O2 -Wall -Wextra -fno-exceptions -fno-rtti \
   -ffunction-sections -fdata-sections -c "$native/app_crt.cpp" -o "$work/obj/app_crt.o"
 
-"$sdk/bin/prospero-lld" -T "$native/ps5-pie.ld" -L "$native" --eh-frame-hdr \
+"$sdk/bin/prospero-lld" -T "$linker_script" -L "$native" --eh-frame-hdr \
   --version-script "$native/app-symbols.map" --exclude-libs=ALL \
   -e _start -o "$work/llvm-pie.elf" \
   "$work/obj/app_crt.o" "$work/obj/main.o" "$work/obj/guest_window_probe.o" \
-  --as-needed "\${sdk_stubs[@]}"
+  --start-group "$sdk/target/lib/libc++.a" "$sdk/target/lib/libc++abi.a" \
+  "$sdk/target/lib/libunwind.a" "$builtins" "$sdk/target/lib/libps5platform.a" --end-group \
+  --as-needed "${sdk_stubs[@]}"
 
 "$tool" link --in "$work/llvm-pie.elf" --out "$work/eboot.elf" \
   --stub-dir "$sdk/target/lib" --module-sdk 0x02000009 \
