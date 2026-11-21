@@ -2693,7 +2693,21 @@ void bg_drain() {
     }
     for (auto& [lo, p] : ready) {
         auto imp = imported.find(lo);
+        if (!p.memory && p.ps5_import_held) {
+#if defined(RELINK_PS5_RADV)
+            if (!ps5_import_release(p)) {
+                std::lock_guard lk(bg_mu);
+                bg_ready.push_back({lo, std::move(p)});
+            }
+#endif
+            continue;
+        }
         if (imp != imported.end() && imp->second.hi >= p.hi) {
+            if (p.buffer) vkDestroyBuffer(dev.device, p.buffer, nullptr);
+            if (p.memory) vkFreeMemory(dev.device, p.memory, nullptr);
+            for (VkDeviceMemory m : p.pieces) vkFreeMemory(dev.device, m, nullptr);
+            p.buffer = VK_NULL_HANDLE, p.memory = VK_NULL_HANDLE;
+            p.pieces.clear();
 #if defined(RELINK_PS5_RADV)
             if (!ps5_import_release(p)) {
                 std::lock_guard lk(bg_mu);
@@ -2701,9 +2715,6 @@ void bg_drain() {
                 continue;
             }
 #endif
-            vkDestroyBuffer(dev.device, p.buffer, nullptr);
-            vkFreeMemory(dev.device, p.memory, nullptr);
-            for (VkDeviceMemory m : p.pieces) vkFreeMemory(dev.device, m, nullptr);
             continue;
         }
         bool overlap = false;   // (amd-fix: a chunk imported ahead that an import made since covers in part: the pools stay disjoint)
@@ -2719,6 +2730,11 @@ void bg_drain() {
         }
         if (overlap) {
             st_prefetch_dropped++;
+            if (p.buffer) vkDestroyBuffer(dev.device, p.buffer, nullptr);
+            if (p.memory) vkFreeMemory(dev.device, p.memory, nullptr);
+            for (VkDeviceMemory m : p.pieces) vkFreeMemory(dev.device, m, nullptr);
+            p.buffer = VK_NULL_HANDLE, p.memory = VK_NULL_HANDLE;
+            p.pieces.clear();
 #if defined(RELINK_PS5_RADV)
             if (!ps5_import_release(p)) {
                 std::lock_guard lk(bg_mu);
@@ -2726,9 +2742,6 @@ void bg_drain() {
                 continue;
             }
 #endif
-            vkDestroyBuffer(dev.device, p.buffer, nullptr);
-            vkFreeMemory(dev.device, p.memory, nullptr);
-            for (VkDeviceMemory m : p.pieces) vkFreeMemory(dev.device, m, nullptr);
             continue;
         }
         if (imp != imported.end()) retire_pool(imp);
@@ -3990,19 +4003,22 @@ void reap_mirrors() {   // (pools_mu held)
         dead_mirrors.pop_front();
     }
     while (!dead_imports.empty() && dead_imports.front().value <= mem_completed) {
+        DeadImport& dead = dead_imports.front();
+        if (dead.buffer) vkDestroyBuffer(dev.device, dead.buffer, nullptr);
+        if (dead.memory) vkFreeMemory(dev.device, dead.memory, nullptr);
+        for (VkDeviceMemory m : dead.pieces) vkFreeMemory(dev.device, m, nullptr);
+        dead.buffer = VK_NULL_HANDLE, dead.memory = VK_NULL_HANDLE;
+        dead.pieces.clear();
 #if defined(RELINK_PS5_RADV)
-        if (dead_imports.front().ps5_import_held &&
-            ps5_memory_import_release(dead_imports.front().lo, dead_imports.front().bytes) != 0) {
+        if (dead.ps5_import_held && ps5_memory_import_release(dead.lo, dead.bytes) != 0) {
             logf("vk: PS5 retired import hold could not be released at %#llx",
-                 (unsigned long long)dead_imports.front().lo);
+                 (unsigned long long)dead.lo);
             break;
         }
+        dead.ps5_import_held = false;
 #endif
-        vkDestroyBuffer(dev.device, dead_imports.front().buffer, nullptr);
-        vkFreeMemory(dev.device, dead_imports.front().memory, nullptr);
-        for (VkDeviceMemory m : dead_imports.front().pieces) vkFreeMemory(dev.device, m, nullptr);
-        st_retired_imports_freed++, st_retired_import_bytes_freed += dead_imports.front().bytes;
-        const uint64_t lo = dead_imports.front().lo, hi = lo + dead_imports.front().bytes;
+        st_retired_imports_freed++, st_retired_import_bytes_freed += dead.bytes;
+        const uint64_t lo = dead.lo, hi = lo + dead.bytes;
         dead_imports.pop_front();
         release_uncovered(lo, hi);   // (relink: what the game freed under it goes back to Windows)
     }
@@ -4230,12 +4246,14 @@ void released_drain() {   // (pools_mu held)
 void imports_give_back() {   // (pools_mu held)
     while (!evicted_pools.empty() && evicted_pools.front().mapped().retired_value <= mem_completed) {
         Pool& p = evicted_pools.front().mapped();
+        if (p.buffer) vkDestroyBuffer(dev.device, p.buffer, nullptr);
+        if (p.memory) vkFreeMemory(dev.device, p.memory, nullptr);
+        for (VkDeviceMemory m : p.pieces) vkFreeMemory(dev.device, m, nullptr);   // (a pool imported as several dma-bufs)
+        p.buffer = VK_NULL_HANDLE, p.memory = VK_NULL_HANDLE;
+        p.pieces.clear();
 #if defined(RELINK_PS5_RADV)
         if (!ps5_import_release(p)) break;
 #endif
-        vkDestroyBuffer(dev.device, p.buffer, nullptr);
-        vkFreeMemory(dev.device, p.memory, nullptr);
-        for (VkDeviceMemory m : p.pieces) vkFreeMemory(dev.device, m, nullptr);   // (a pool imported as several dma-bufs)
         const uint64_t lo = p.lo, hi = p.hi;
         evicted_pools.pop_front();
         release_uncovered(lo, hi);   // (relink: what the game freed under it goes back to Windows)
