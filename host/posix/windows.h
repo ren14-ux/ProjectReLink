@@ -203,6 +203,32 @@ static inline ULONGLONG GetTickCount64(void) {
     return (ULONGLONG)ts.tv_sec * 1000 + (ULONGLONG)ts.tv_nsec / 1000000;
 }
 static inline DWORD GetTickCount(void) { return (DWORD)GetTickCount64(); }
+/* GlobalMemoryStatusEx, from /proc/meminfo. Only the fields the renderer reads are filled: ullAvailPageFile is the commit still
+   available (Windows: free RAM + free page file; here MemAvailable + SwapFree), which vk_draw.cpp watches before it makes
+   pipelines ahead of their first draw. Linux overcommits, so this is a conservative stand-in, not the kernel's own limit. */
+typedef struct {
+    DWORD dwLength, dwMemoryLoad;
+    DWORDLONG ullTotalPhys, ullAvailPhys, ullTotalPageFile, ullAvailPageFile, ullTotalVirtual, ullAvailVirtual, ullAvailExtendedVirtual;
+} MEMORYSTATUSEX;
+static inline BOOL GlobalMemoryStatusEx(MEMORYSTATUSEX *ms) {
+    FILE *f = fopen("/proc/meminfo", "r");
+    if (!f) return FALSE;
+    unsigned long long total = 0, avail = 0, swap_total = 0, swap_free = 0, kb;
+    char line[128];
+    while (fgets(line, sizeof line, f)) {
+        if (sscanf(line, "MemTotal: %llu kB", &kb) == 1) total = kb;
+        else if (sscanf(line, "MemAvailable: %llu kB", &kb) == 1) avail = kb;
+        else if (sscanf(line, "SwapTotal: %llu kB", &kb) == 1) swap_total = kb;
+        else if (sscanf(line, "SwapFree: %llu kB", &kb) == 1) swap_free = kb;
+    }
+    fclose(f);
+    if (!total) return FALSE;
+    ms->dwMemoryLoad = (DWORD)(100 - avail * 100 / total);
+    ms->ullTotalPhys = total << 10, ms->ullAvailPhys = avail << 10;
+    ms->ullTotalPageFile = (total + swap_total) << 10, ms->ullAvailPageFile = (avail + swap_free) << 10;
+    ms->ullTotalVirtual = ms->ullAvailVirtual = 1ull << 47, ms->ullAvailExtendedVirtual = 0;
+    return TRUE;
+}
 void Sleep(DWORD ms);
 static inline BOOL SwitchToThread(void) { return sched_yield() == 0; }
 static inline UINT timeBeginPeriod(UINT p) { (void)p; return 0; }

@@ -1,0 +1,27 @@
+# Checks the Linux (Ubuntu) build without any game data: scripts/linux/check.sh builds the Vulkan back end (relink_vk.so),
+# compiles the host runtime against the POSIX layer, and runs the tests that need no game.
+name: Linux
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: scripts/linux/install-deps.sh
+      - name: Check the Linux build
+        run: scripts/linux/check.sh
